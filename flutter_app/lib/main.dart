@@ -37,8 +37,8 @@ Future<void> main() async {
   try {
     if (kIsWeb) {
       await Firebase.initializeApp(
-        options: const FirebaseOptions(
-          apiKey: "AIzaSyCQeKw4BZkpO1TiBqbRg4q9qhmfDdnfD8E",
+        options: FirebaseOptions(
+          apiKey: dotenv.env['FIREBASE_API_KEY_WEB'] ?? '',
           authDomain: "krishivikasai.firebaseapp.com",
           projectId: "krishivikasai",
           storageBucket: "krishivikasai.firebasestorage.app",
