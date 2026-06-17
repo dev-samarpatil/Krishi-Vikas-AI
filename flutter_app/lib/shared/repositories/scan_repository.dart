@@ -12,6 +12,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/supabase_client.dart';
 import '../models/budget_item.dart';
 import '../models/kvk_model.dart';
+import '../services/local_storage_service.dart';
 import '../../features/scan/models/scan_response_model.dart';
 
 import 'package:flutter/foundation.dart' show kIsWeb, compute;
@@ -117,14 +118,45 @@ class ScanRepository {
     }
   }
 
-  /// Saves the diagnosis treatment choice to farm logs
+  /// Saves the diagnosis treatment choice to farm logs.
+  /// For guest users, persists locally in Hive. For signed-in users, POSTs to backend.
   Future<void> saveToFarmLog({
     required String diagnosisId,
     required String treatmentType,
+    required String diseaseName,
+    required String crop,
+    required String farmId,
   }) async {
-    final userId = _supabase.auth.currentUser?.id ?? 'anonymous';
-    final baseUrl = AppConstants.baseUrl;
+    final userId = _supabase.auth.currentUser?.id;
 
+    if (userId == null) {
+      // ── Guest Mode: save locally in Hive ──────────────────────────
+      final storage = LocalStorageService();
+      final list = List<dynamic>.from(storage.guestDiagnosesJson ?? []);
+      list.insert(0, {
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'farm_id': farmId,
+        'user_id': 'guest',
+        'crop': crop,
+        'disease_name': diseaseName,
+        'confidence': null,
+        'treatment_chosen': treatmentType,
+        'treatment_steps': null,
+        'cost_estimate': null,
+        'prevention_tip': null,
+        'language': 'en',
+        'weather_at_scan': null,
+        'image_url': null,
+        'model_used': null,
+        'severity': null,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      await storage.setGuestDiagnosesJson(list);
+      return;
+    }
+
+    // ── Authenticated: POST to backend ────────────────────────────────
+    final baseUrl = AppConstants.baseUrl;
     try {
       await _dio.post(
         '$baseUrl/api/log-treatment',

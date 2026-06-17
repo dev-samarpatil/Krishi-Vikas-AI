@@ -21,9 +21,15 @@ Alert types and what to say:
 - irrigation_needed: Heatwave coming, crop needs water immediately
 - fungal_risk: High humidity for 3+ days, spray preventative fungicide
 - frost_warning: Temperature dropping below 5°C, cover sensitive crops
+- fertilizer_timing: Heavy rain expected, delay fertilizer application to prevent runoff
+- gray_leaf_spot_risk: High humidity and warm temperatures increase Gray Leaf Spot risk, monitor leaves
+- maize_rainfall_risk: Heavy rainfall risk, ensure proper field drainage
+- whitefly_risk: Hot and humid conditions increase Whitefly risk, check undersides of leaves
+- boll_rot_risk: Rain during boll formation increases rot risk, monitor closely
+- flooding_risk: Excessive rain expected, maintain bunds and manage water levels
 
-Write ONE short, urgent message in {language}.
-Maximum 2 sentences. Be specific about the timeframe.
+Write ONE short, actionable, and urgent message in {language}.
+Maximum 2 sentences. Be specific about the timeframe and the recommended action.
 Return ONLY the alert text string, no JSON.
 """
 
@@ -51,23 +57,49 @@ async def climate_alert(req: ClimateAlertRequest):
     alert_type = None
     forecast_detail = ""
 
-    # Check next 3 days for urgent rain
-    rain_next_3_days = sum(day.get('rain_mm', 0) for day in forecast[:3])
-    if rain_next_3_days > 10 and req.crop_stage.lower() == "mature":
-        alert_type = "harvest_urgent"
-        forecast_detail = f"Heavy rain ({rain_next_3_days}mm) expected in the next 3 days."
-    
-    # Check max temp
-    max_temp = max(day.get('temp_max', 0) for day in forecast)
-    if not alert_type and max_temp > 40:
-        alert_type = "irrigation_needed"
-        forecast_detail = f"Heatwave expected reaching {max_temp}°C."
+    crop_lower = req.crop.lower()
+    stage_lower = req.crop_stage.lower()
 
-    # Check humidity sequence
+    rain_next_3_days = sum(day.get('rain_mm', 0) for day in forecast[:3])
+    max_temp = max(day.get('temp_max', 0) for day in forecast)
     high_humidity_days = sum(1 for day in forecast[:3] if day.get('humidity', 0) > 85)
-    if not alert_type and high_humidity_days >= 3:
-        alert_type = "fungal_risk"
-        forecast_detail = "High humidity (>85%) predicted for 3 consecutive days."
+
+    # 1. CROP-SPECIFIC ALERTS
+    if crop_lower == "maize":
+        if rain_next_3_days > 20 and stage_lower in ["vegetative", "flowering", "unknown"]:
+            alert_type = "fertilizer_timing"
+            forecast_detail = f"Heavy rain ({rain_next_3_days}mm). Delay fertilizer application to prevent runoff."
+        elif high_humidity_days >= 2 and max_temp > 25:
+            alert_type = "gray_leaf_spot_risk"
+            forecast_detail = "High humidity and warm temp increase Gray Leaf Spot risk. Monitor leaves."
+        elif rain_next_3_days > 30:
+            alert_type = "maize_rainfall_risk"
+            forecast_detail = "Heavy rainfall risk. Ensure proper field drainage to prevent waterlogging."
+            
+    elif crop_lower == "cotton":
+        if max_temp > 32 and high_humidity_days >= 2:
+            alert_type = "whitefly_risk"
+            forecast_detail = "Hot, humid conditions increase Whitefly risk. Check undersides of leaves."
+        elif rain_next_3_days > 15 and stage_lower == "boll formation":
+            alert_type = "boll_rot_risk"
+            forecast_detail = f"Rain ({rain_next_3_days}mm) during boll formation increases rot risk."
+
+    elif crop_lower == "rice":
+        if rain_next_3_days > 50:
+            alert_type = "flooding_risk"
+            forecast_detail = f"Excessive rain ({rain_next_3_days}mm) predicted. Maintain bunds to prevent extreme flooding."
+
+    # 2. GENERAL ALERTS (fallback if no crop-specific alert triggered)
+    if not alert_type:
+        if rain_next_3_days > 10 and stage_lower == "mature":
+            alert_type = "harvest_urgent"
+            forecast_detail = f"Heavy rain ({rain_next_3_days}mm) expected in the next 3 days."
+        elif max_temp > 40:
+            alert_type = "irrigation_needed"
+            forecast_detail = f"Heatwave expected reaching {max_temp}°C."
+        elif high_humidity_days >= 3:
+            alert_type = "fungal_risk"
+            forecast_detail = "High humidity (>85%) predicted for 3 consecutive days."
 
     if not alert_type:
         return {"alert_level": None, "message": ""}
@@ -83,7 +115,7 @@ async def climate_alert(req: ClimateAlertRequest):
     )
     
     message = await generate_alert_text(prompt)
-    alert_level = "urgent" if alert_type in ["harvest_urgent", "irrigation_needed"] else "advisory"
+    alert_level = "urgent" if alert_type in ["harvest_urgent", "irrigation_needed", "flooding_risk"] else "advisory"
 
     return {
         "alert_level": alert_level,

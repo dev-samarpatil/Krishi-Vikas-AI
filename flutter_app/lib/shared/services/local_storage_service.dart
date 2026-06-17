@@ -45,6 +45,12 @@ class LocalStorageService {
   Future<void> setGuestFarmsJson(List<dynamic> jsonList) =>
       _cache.put('guest_farms', jsonList);
 
+  // ── Guest Mode Diagnoses ───────────────────────────────────────────
+  List<dynamic>? get guestDiagnosesJson => _cache.get('guest_diagnoses');
+
+  Future<void> setGuestDiagnosesJson(List<dynamic> jsonList) =>
+      _cache.put('guest_diagnoses', jsonList);
+
   // ── FCM Token ─────────────────────────────────────────────────────
   String? get fcmToken => _settings.get(AppConstants.fcmTokenKey);
 

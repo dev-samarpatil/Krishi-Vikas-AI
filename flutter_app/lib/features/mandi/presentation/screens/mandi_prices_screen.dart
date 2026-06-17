@@ -35,18 +35,28 @@ class _MandiPricesScreenState extends ConsumerState<MandiPricesScreen> {
     final district = selectedFarm?.district ?? 'Palghar';
     final state = selectedFarm?.state ?? 'Maharashtra';
     final crop = selectedFarm?.crop ?? 'Tomato';
+    final lat = selectedFarm?.lat;
+    final lon = selectedFarm?.lng;
 
     try {
       final dio = Dio(BaseOptions(headers: {'Bypass-Tunnel-Reminder': 'true'}));
       final baseUrl = AppConstants.baseUrl;
 
+      final queryParams = <String, dynamic>{
+        'district': district,
+        'state': state,
+        'crop': crop,
+      };
+      
+      if (lat != null && lon != null) {
+        queryParams['lat'] = lat.toString();
+        queryParams['lon'] = lon.toString();
+        queryParams['radius'] = '150';
+      }
+
       final response = await dio.get(
         '$baseUrl/mandi/prices',
-        queryParameters: {
-          'district': district,
-          'state': state,
-          'crop': crop,
-        },
+        queryParameters: queryParams,
       );
 
       final data = response.data;
@@ -152,7 +162,9 @@ class _MandiPricesScreenState extends ConsumerState<MandiPricesScreen> {
           'trend': matchingApi['trend'] ?? def['trend'],
           'trend_percent': matchingApi['trend_percent'] ?? def['trend_percent'],
           'tags': def['tags'],
-          'distance': def['distance'],
+          'distance': matchingApi['distance_km'] != null ? '${matchingApi['distance_km']} km' : def['distance'],
+          'lat': matchingApi['lat'],
+          'lng': matchingApi['lng'],
         });
       } else {
         merged.add(def);
@@ -455,13 +467,28 @@ class _MandiPricesScreenState extends ConsumerState<MandiPricesScreen> {
                   child: ElevatedButton(
                     onPressed: () async {
                       final marketName = top['market'] ?? 'APMC Market';
-                      // Try to open Google Maps app first, fallback to browser
-                      final mapsAppUrl = Uri.parse('geo:0,0?q=${Uri.encodeComponent(marketName)}');
-                      final mapsWebUrl = Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(marketName)}');
-                      if (await canLaunchUrl(mapsAppUrl)) {
-                        await launchUrl(mapsAppUrl, mode: LaunchMode.externalApplication);
-                      } else if (await canLaunchUrl(mapsWebUrl)) {
-                        await launchUrl(mapsWebUrl, mode: LaunchMode.externalApplication);
+                      final selectedFarm = ref.read(selectedFarmProvider);
+                      final district = selectedFarm?.district ?? '';
+                      final lat = top['lat'];
+                      final lng = top['lng'];
+
+                      String urlString;
+                      if (lat != null && lng != null) {
+                        urlString = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving';
+                      } else {
+                        final query = Uri.encodeComponent('$marketName $district');
+                        urlString = 'https://www.google.com/maps/dir/?api=1&destination=$query&travelmode=driving';
+                      }
+
+                      final uri = Uri.parse(urlString);
+                      try {
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        } else {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      } catch (e) {
+                        debugPrint('Could not launch maps: $e');
                       }
                     },
                     style: ElevatedButton.styleFrom(

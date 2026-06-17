@@ -459,102 +459,122 @@ class MyFarmScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Diagnosis Log', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF191C1D))),
-              TextButton(
-                onPressed: () {},
-                child: const Row(
-                  children: [
-                    Text('View All', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF012D1D))),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward, size: 16, color: Color(0xFF012D1D)),
-                  ],
-                ),
+              const Text(
+                'Farm Health Timeline',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF191C1D)),
+              ),
+              const Tooltip(
+                message: 'Auto-populated from your saved disease scans.',
+                child: Icon(Icons.info_outline, size: 18, color: Color(0xFF717973)),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           diagnosesAsync.when(
             data: (diagnoses) {
               if (diagnoses.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: Text('No diagnosis history', style: TextStyle(color: Color(0xFF717973)))),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.timeline_outlined, size: 40, color: Color(0xFF717973)),
+                        SizedBox(height: 8),
+                        Text(
+                          'No health events yet.\nSave a scan to start tracking.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xFF717973), fontSize: 14, height: 1.5),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               }
+
+              final items = diagnoses.take(5).toList();
               return Column(
-                children: diagnoses.take(3).map((d) {
-                  final isHealthy = d.diseaseName == null || d.diseaseName!.toLowerCase().contains('healthy');
-                  final recommendation = (d.treatmentSteps != null && d.treatmentSteps!.isNotEmpty) 
-                      ? d.treatmentSteps!.first['step']?.toString() ?? d.treatmentSteps!.first['title']?.toString() ?? 'Treatment suggested'
-                      : 'No action required';
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F5),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                children: items.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final d = entry.value;
+                  final isLast = index == items.length - 1;
+                  final isHealthy = d.diseaseName == null ||
+                      d.diseaseName!.toLowerCase().contains('healthy');
+
+                  final dotColor = isHealthy
+                      ? const Color(0xFF43A047)
+                      : const Color(0xFFE53935);
+
+                  final eventLabel = isHealthy
+                      ? 'Healthy Crop Observed'
+                      : '${d.diseaseName ?? 'Issue'} Detected';
+
+                  final subLabel = (d.treatmentType != null && d.treatmentType!.isNotEmpty)
+                      ? 'Treatment logged: ${d.treatmentType}'
+                      : (isHealthy ? 'No action needed' : 'No treatment logged yet');
+
+                  return IntrinsicHeight(
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: isHealthy ? const Color(0xFFC1ECD4) : const Color(0xFFFFDAD6),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(
-                            isHealthy ? Icons.check_circle_outline : Icons.bug_report_outlined,
-                            color: isHealthy ? const Color(0xFF002114) : const Color(0xFFBA1A1A),
-                          ),
+                        // Timeline spine
+                        Column(
+                          children: [
+                            Container(
+                              width: 14,
+                              height: 14,
+                              decoration: BoxDecoration(
+                                color: dotColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                                boxShadow: [
+                                  BoxShadow(color: dotColor.withOpacity(0.4), blurRadius: 4),
+                                ],
+                              ),
+                            ),
+                            if (!isLast)
+                              Expanded(
+                                child: Container(
+                                  width: 2,
+                                  color: const Color(0xFFE1E3E4),
+                                ),
+                              ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 16),
+                        // Content
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      isHealthy ? 'Crop Healthy' : d.diseaseName ?? 'Issue Detected',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF191C1D)),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: isLast ? 0 : 20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  DateFormat('dd MMM yyyy').format(d.createdAt),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF717973),
+                                    letterSpacing: 0.4,
                                   ),
-                                  Text(
-                                    DateFormat('MMM d').format(d.createdAt),
-                                    style: const TextStyle(fontSize: 12, color: Color(0xFF414844)),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  eventLabel,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: isHealthy
+                                        ? const Color(0xFF2E7D32)
+                                        : const Color(0xFFC62828),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  if (!isHealthy)
-                                    Container(
-                                      margin: const EdgeInsets.only(right: 8),
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF1B4332).withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text('Organic', style: TextStyle(color: Color(0xFF012D1D), fontSize: 10, fontWeight: FontWeight.bold)),
-                                    ),
-                                  Expanded(
-                                    child: Text(
-                                      recommendation,
-                                      style: const TextStyle(fontSize: 13, color: Color(0xFF414844)),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  subLabel,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF414844)),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -563,8 +583,15 @@ class MyFarmScreen extends ConsumerWidget {
                 }).toList(),
               );
             },
-            loading: () => const Center(child: Padding(padding: EdgeInsets.all(24.0), child: CircularProgressIndicator())),
-            error: (e, _) => Center(child: Text('Error loading logs', style: TextStyle(color: Colors.red[300]))),
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+            error: (e, _) => Center(
+              child: Text('Error loading timeline', style: TextStyle(color: Colors.red[300])),
+            ),
           ),
         ],
       ),

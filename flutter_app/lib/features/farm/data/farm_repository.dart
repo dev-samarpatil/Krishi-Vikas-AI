@@ -219,7 +219,23 @@ class FarmRepository {
   /// Fetch all diagnoses for a specific farm, newest first.
   Future<List<DiagnosisModel>> fetchDiagnoses(String farmId) async {
     final currentUser = _client.auth.currentUser;
-    if (currentUser == null) return []; // Return empty list for guest mode
+
+    if (currentUser == null) {
+      // Guest Mode: fetch from local Hive cache, filtered by farmId
+      final storage = LocalStorageService();
+      final list = storage.guestDiagnosesJson ?? [];
+      final filtered = list
+          .where((item) {
+            final map = Map<String, dynamic>.from(item as Map);
+            return map['farm_id'] == farmId;
+          })
+          .map((json) =>
+              DiagnosisModel.fromJson(Map<String, dynamic>.from(json as Map)))
+          .toList();
+      // Sort newest first
+      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return filtered;
+    }
 
     final response = await _client
         .from('diagnoses')

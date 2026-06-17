@@ -51,9 +51,13 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
     try {
       final treatmentType = _tabController.index == 0 ? 'organic' : 'chemical';
       final repo = ref.read(scanRepositoryProvider);
+      final selectedFarm = ref.read(selectedFarmProvider);
       await repo.saveToFarmLog(
         diagnosisId: result.diagnosisId,
         treatmentType: treatmentType,
+        diseaseName: result.diseaseName,
+        crop: selectedFarm?.crop ?? 'Unknown Crop',
+        farmId: selectedFarm?.id ?? '',
       );
       
       // Update soil score in local farms provider to trigger dynamic update

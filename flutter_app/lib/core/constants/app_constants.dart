@@ -27,7 +27,7 @@ class AppConstants {
   static String get openWeatherApiKey => dotenv.env['OPENWEATHER_API_KEY'] ?? '';
   static String get roboflowApiKey => dotenv.env['ROBOFLOW_API_KEY'] ?? '';
   static String get roboflowModelId => dotenv.env['ROBOFLOW_MODEL_ID'] ?? '';
-  static const String baseUrl = 'https://krishivikas-samar.loca.lt';
+  static const String baseUrl = 'https://krishi-vikas-ai.onrender.com';
 
   // ── API Endpoints (relative to apiBaseUrl) ───────────────────────
   static const String authVerifyOtp = '/auth/verify-otp';

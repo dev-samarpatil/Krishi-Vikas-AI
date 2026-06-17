@@ -220,62 +220,83 @@ async def get_farmer_profile(farmer_id: str) -> dict:
         return mock
 
 async def get_farm_soil_health(farm_id: str) -> dict:
-    """Calculate soil health score dynamically based on diagnosis history for a specific farm."""
-    client = get_supabase()
-    mock = {"soil_score": 60, "badges": ["🌱 Soil Guardian"]}
-    if client is None: return mock
+    """Calculate dynamic soil health score based on real farm activity.
     
+    Scoring model:
+      Base Score    = 70
+      Healthy scan  = +2 per scan
+      Mild disease  = -5  (confidence < 0.70)
+      Moderate      = -10 (confidence 0.70–0.84)
+      Severe        = -20 (confidence >= 0.85)
+      Treatment logged (organic/chemical) = +5
+      Repeated disease occurrence = -5 additional
+      Bounds: 0–100
+    """
+    client = get_supabase()
+    mock = {"soil_score": 70, "badges": ["🌱 Soil Guardian"]}
+    if client is None:
+        return mock
+
     try:
-        score = 60 # Base score
-        
-        # Get history of last 10 diagnoses for this farm
-        resp = client.table("diagnoses")\
-            .select("disease_name, treatment_chosen")\
-            .eq("farm_id", farm_id)\
-            .order("created_at", desc=True)\
-            .limit(10)\
+        score = 70  # Base score
+
+        # Fetch last 10 diagnoses for this farm
+        resp = (
+            client.table("diagnoses")
+            .select("disease_name, confidence, treatment_chosen")
+            .eq("farm_id", farm_id)
+            .order("created_at", desc=True)
+            .limit(10)
             .execute()
-            
+        )
+
+        disease_counts: dict[str, int] = {}
+
         if resp.data:
             for diag in resp.data:
-                name = diag.get("disease_name", "").lower()
-                treatment = diag.get("treatment_chosen", "")
-                if treatment:
-                    treatment = treatment.lower()
-                
-                # Deduct based on disease/deficiency type
-                if "deficiency" in name:
-                    if "nitrogen" in name or "phosphorous" in name or "potassium" in name:
-                        score -= 15
-                    else:
-                        score -= 10
-                elif "blight" in name or "rust" in name or "virus" in name or "wilt" in name:
-                    score -= 10
-                elif "pest" in name or "borer" in name or "hopper" in name or "mite" in name or "aphid" in name:
-                    score -= 5
+                name = str(diag.get("disease_name") or "").lower().strip()
+                treatment = str(diag.get("treatment_chosen") or "").lower().strip()
+                conf = float(diag.get("confidence") or 0.0)
+
+                is_healthy = not name or "healthy" in name
+
+                if is_healthy:
+                    score += 2  # Healthy scan bonus
                 else:
-                    score -= 2 # Generic penalty
-                    
-                # Add based on treatment
-                if treatment == "organic":
-                    score += 10
-                elif treatment == "chemical":
-                    score += 2
-                    
-        # Clamp score between 10 and 100
-        score = max(10, min(100, score))
-        
+                    # Repeated disease penalty
+                    disease_counts[name] = disease_counts.get(name, 0) + 1
+                    if disease_counts[name] > 1:
+                        score -= 5
+
+                    # Severity penalty based on AI confidence
+                    if conf >= 0.85:
+                        score -= 20  # Severe
+                    elif conf >= 0.70:
+                        score -= 10  # Moderate
+                    else:
+                        score -= 5   # Mild
+
+                # Treatment bonus
+                if treatment in ("organic", "chemical"):
+                    score += 5
+
+        # Hard bounds
+        score = max(0, min(100, score))
+
         badges = []
-        if score >= 80: badges.append("🌿 Organic Champion")
-        elif score >= 60: badges.append("🌱 Soil Guardian")
-        
-        # Save updated score back to the farm
+        if score >= 81:
+            badges.append("🌿 Organic Champion")
+        elif score >= 61:
+            badges.append("🌱 Soil Guardian")
+
+        # Persist updated score back to the farm row
         try:
             client.table("farms").update({"soil_score": score}).eq("id", farm_id).execute()
-        except:
+        except Exception:
             pass
 
         return {"soil_score": score, "badges": badges}
+
     except Exception as e:
         print(f"Supabase get_farm_soil_health error: {e}")
         return mock
