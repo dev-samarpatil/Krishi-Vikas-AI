@@ -44,6 +44,7 @@ const generateDemoClusters = (farmerLat: number, farmerLng: number) => [
 ];
 
 export default function HomePage() {
+  const [isMounted, setIsMounted] = useState(false);
   const [viewState, setViewState] = useState<ViewState>("home");
   const [isBackendWaking, setIsBackendWaking] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -57,7 +58,14 @@ export default function HomePage() {
   } | null>(null);
   const [mandiData, setMandiData] = useState<MandiPrice[] | null>(null);
   const [currentDistrict, setCurrentDistrict] = useState<string | null>("Pune");
-  const [locationDisplay, setLocationDisplay] = useState("Pune, Maharashtra");
+  const [location, setLocation] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const d = localStorage.getItem('kv_district')
+      const s = localStorage.getItem('kv_state')
+      if (d && s) return `${d}, ${s}`
+    }
+    return null
+  });
   const [crop, setCrop] = useState<string | null>("Tomato");
   const [farmSize, setFarmSize] = useState<string | null>("1-2 Acres");
   const router = useRouter();
@@ -68,6 +76,7 @@ export default function HomePage() {
       : "http://localhost:8000";
 
   useEffect(() => {
+    setIsMounted(true);
     const key = process.env.NEXT_PUBLIC_GEMINI_API_KEY
     console.log("Gemini key present:", !!key,
       key ? key.substring(0, 8) + "..." : "MISSING")
@@ -92,64 +101,47 @@ export default function HomePage() {
         });
     }
 
-    // Show cached location immediately
-    const cachedDist = localStorage.getItem('kv_district');
-    const cachedState = localStorage.getItem('kv_state');
-    if (cachedDist && cachedState) {
-      setLocationDisplay(`${cachedDist}, ${cachedState}`);
-    } else if (cachedDist) {
-      setLocationDisplay(cachedDist);
-    } else {
-      setLocationDisplay("Pune, Maharashtra");
-      localStorage.setItem('kv_district', 'Pune');
-      localStorage.setItem('kv_state', 'Maharashtra');
-    }
-
-    // Then try to get fresh GPS in background
+    // Request GPS with fast settings
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
+          const { latitude: lat, longitude: lng } = pos.coords
+          localStorage.setItem('kv_lat', lat.toString())
+          localStorage.setItem('kv_lng', lng.toString())
+          
           try {
-            // Reverse geocode
             const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json`,
-              { headers: { "Accept-Language": "en-US", "User-Agent": "KisanVoiceApp/1.0" } }
-            );
-            const data = await res.json();
-            const district = data.address?.county ||
-              data.address?.city ||
-              'Your Area';
-            const state = data.address?.state || 'India';
-            const cleanDistrict = district
-              .replace(' District', '')
-              .replace(' district', '');
-
-            // Update display and cache
-            setLocationDisplay(`${cleanDistrict}, ${state}`);
-            localStorage.setItem('kv_district', cleanDistrict);
-            localStorage.setItem('kv_state', state);
-            localStorage.setItem('kv_lat', pos.coords.latitude.toString());
-            localStorage.setItem('kv_lng', pos.coords.longitude.toString());
-
-            // Update currentDistrict for Mandi widget
-            setCurrentDistrict(cleanDistrict);
-          } catch (e) { }
-        },
-        (error) => {
-          // GPS failed — use cached or default
-          if (!localStorage.getItem('kv_district')) {
-            setLocationDisplay('Maharashtra');
-            localStorage.setItem('kv_district', 'Pune');
-            localStorage.setItem('kv_state', 'Maharashtra');
-            setCurrentDistrict('Pune');
+              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+              { headers: { "Accept-Language": "en-US", 'User-Agent': 'KrishiVikasAI/1.0' } }
+            )
+            const data = await res.json()
+            const addr = data.address || {}
+            const district = (addr.county || addr.city_district || 
+                             addr.city || addr.town || 'Your Area')
+                             .replace(' District', '')
+                             .replace(' Subdistrict', '')
+                             .trim()
+            const state = addr.state || 'Maharashtra'
+            
+            localStorage.setItem('kv_district', district)
+            localStorage.setItem('kv_state', state)
+            setLocation(`${district}, ${state}`)
+            setCurrentDistrict(district)
+          } catch {
+            // Use coordinates directly if geocoding fails
+            setLocation(`${lat.toFixed(2)}°N, ${lng.toFixed(2)}°E`)
           }
         },
-        {
-          timeout: 8000,      // 8 second timeout
-          maximumAge: 300000, // Accept 5 minute old cache
-          enableHighAccuracy: false  // Faster, less precise
+        () => {
+          // GPS denied or failed — use cached or default
+          if (!location) setLocation('Maharashtra')
+        },
+        { 
+          timeout: 6000,
+          maximumAge: 600000,   // Accept 10 min old cache
+          enableHighAccuracy: false  // Faster response
         }
-      );
+      )
     }
 
     const checkAlerts = async () => {
@@ -347,7 +339,8 @@ export default function HomePage() {
       const errorStr = err?.message || err?.toString() || '';
 
       if (errorStr.includes('RATE_LIMIT') || errorStr.includes('429') ||
-        errorStr.includes('quota') || errorStr.includes('Too Many Requests')) {
+        errorStr.includes('quota') || errorStr.includes('Too Many Requests') ||
+        errorStr.includes('AI_BUSY') || errorStr.includes('503')) {
         // Show rate limit UI — not a fake diagnosis card
         setViewState("rate_limit");
       } else {
@@ -500,7 +493,7 @@ export default function HomePage() {
           </div>
         )}
         <p className="text-sm font-bold text-gray-500 mt-1 uppercase tracking-wider flex items-center gap-1">
-          {crop || "Loading..."} | 📍 {locationDisplay} {farmSize ? `| ${farmSize}` : ""}
+          {crop || "Loading..."} | 📍 {isMounted ? (location?.split(',')[0] || "India") : "..."} {farmSize ? `| ${farmSize}` : ""}
         </p>
       </div>
 

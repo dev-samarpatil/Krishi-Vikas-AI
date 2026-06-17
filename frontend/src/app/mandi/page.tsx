@@ -44,39 +44,23 @@ export default function MandiPage() {
       setIsLive(false);
     };
 
-    const getRealLocation = () => {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(async (position) => {
-          try {
-            const { latitude, longitude } = position.coords;
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
-            const data = await res.json();
-
-            // Extract district from Nominatim (usually state_district or county)
-            let realDistrict = data.address?.state_district || data.address?.county || data.address?.city || 'Pune';
-            realDistrict = realDistrict.replace(' District', ''); // Clean up string
-            const realState = data.address?.state || 'Maharashtra';
-
-            // Save to localStorage for other tabs
-            localStorage.setItem('kv_district', realDistrict);
-            localStorage.setItem('kv_state', realState);
-
-            loadPrices(realDistrict, realState);
-          } catch (error) {
-            console.error("Geocoding failed, falling back to storage or Nashik", error);
-            loadPrices(localStorage.getItem('kv_district') || 'Nashik', localStorage.getItem('kv_state') || 'Maharashtra');
-          }
-        }, (error) => {
-          console.warn("GPS Permission denied, using storage or Nashik");
-          loadPrices(localStorage.getItem('kv_district') || 'Nashik', 'Maharashtra');
-        });
-      } else {
-        loadPrices('Nashik', 'Maharashtra');
-      }
+    // DO NOT fetch location again in Mandi page
+    // Read from localStorage cache set by Home page
+    const getLocationFromCache = () => {
+      const cachedDistrict = localStorage.getItem('kv_district');
+      const cachedState = localStorage.getItem('kv_state');
+      
+      const d = cachedDistrict || 'Pune';
+      const s = cachedState || 'Maharashtra';
+      loadPrices(d, s);
     };
 
-    // Trigger the location fetch immediately on mount
-    getRealLocation();
+    getLocationFromCache();
+
+    // Update if Home page sets location in another tab
+    const handleStorage = () => getLocationFromCache();
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, [ctx.crop_types]);
 
   return (

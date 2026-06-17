@@ -1,0 +1,98 @@
+name: krishi_vikas_ai
+description: AI-powered farming assistant for Indian farmers. Crop diagnosis, voice chat, weather alerts, market prices, government schemes.
+publish_to: 'none'
+version: 2.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.3.5
+
+  # Navigation
+  go_router: ^14.8.1
+
+  # Networking
+  dio: ^5.4.3+1
+
+  # Backend / Auth
+  supabase_flutter: 2.12.4
+
+  # Local Storage
+  hive_flutter: ^1.1.0
+  hive: ^2.2.3
+
+  # Push Notifications
+  firebase_messaging: ^15.0.4
+  firebase_core: ^3.1.1
+
+  # Maps
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
+  # Location
+  geolocator: ^12.0.0
+  geocoding: ^4.0.0
+
+  # Camera / Image
+  image_picker: ^1.1.2
+  camera: ^0.12.0
+  path_provider: ^2.1.5
+  image: ^4.1.7
+
+  # i18n
+  intl: 0.20.2
+
+  # Permissions
+  permission_handler: ^11.4.0
+
+  # Environment Variables
+  flutter_dotenv: ^5.2.1
+
+  # UI Utilities
+  cupertino_icons: ^1.0.6
+  cached_network_image: ^3.3.1
+  shimmer: ^3.0.0
+  fl_chart: ^0.68.0
+  flutter_svg: ^2.0.10+1
+  google_fonts: ^6.3.3
+  lottie: ^3.1.0
+  connectivity_plus: ^6.0.3
+  js: ^0.7.2
+  speech_to_text: ^7.4.0
+  flutter_tts: ^4.2.5
+  url_launcher: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  riverpod_generator: ^2.4.0
+  build_runner: ^2.4.13
+  hive_generator: ^2.0.1
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  image_path: "assets/images/app_logo.png"
+
+flutter:
+  uses-material-design: true
+  generate: true
+
+  assets:
+    - .env
+    - assets/images/
+    - assets/lottie/
+    - assets/data/
+
+
+

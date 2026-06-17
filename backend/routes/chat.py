@@ -14,13 +14,15 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     language: str
-    lat: float
-    long: float
+    lat: Optional[float] = 19.997
+    long: Optional[float] = 73.789
     crop: Optional[str] = None
     last_diagnosis: str | None = None
+    district: Optional[str] = None
 
 @router.post("/api/chat")
-async def chat(req: ChatRequest, fastapi_req: Request):
+@router.post("/farms/{id}/chat")
+async def chat(req: ChatRequest, fastapi_req: Request, id: Optional[str] = None):
     """
     Process context-aware chat utilizing Groq. Optionally grabs latest market prices 
     if user intends to know prices (basic keyword intercept proxy).
@@ -32,13 +34,15 @@ async def chat(req: ChatRequest, fastapi_req: Request):
         )
 
     try:
-        # Extract location 
+        # Extract location — use provided district or reverse-geocode from lat/long
+        district = req.district or None
+        state = "Maharashtra"
         try:
             geo = await reverse_geocode(req.lat, req.long)
-            district = geo["district"]
-            state = geo["state"]
+            district = district or geo["district"]
+            state = geo.get("state", "Maharashtra")
         except:
-            district = "Nashik"
+            district = district or "Nashik"
             state = "Maharashtra"
 
         # Context gathering

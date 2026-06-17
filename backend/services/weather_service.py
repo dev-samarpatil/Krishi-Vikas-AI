@@ -5,13 +5,14 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 BASE_URL = "https://api.openweathermap.org/data/2.5"
 
 
-async def get_current_weather(lat: float, lon: float) -> dict:
+async def get_current_weather(lat: float, lon: float, lang: str = "en") -> dict:
     """Get current weather from OpenWeather API."""
     params = {
         "lat": lat,
         "lon": lon,
         "appid": OPENWEATHER_API_KEY,
         "units": "metric",
+        "lang": lang,
     }
 
     try:
@@ -49,7 +50,7 @@ async def get_current_weather(lat: float, lon: float) -> dict:
         }
 
 
-async def get_5day_forecast(lat: float, lon: float) -> list[dict]:
+async def get_5day_forecast(lat: float, lon: float, lang: str = "en") -> list[dict]:
     """Get 5-day forecast from OpenWeather API."""
     params = {
         "lat": lat,
@@ -57,6 +58,7 @@ async def get_5day_forecast(lat: float, lon: float) -> list[dict]:
         "appid": OPENWEATHER_API_KEY,
         "units": "metric",
         "cnt": 40,  # 5 days × 8 (3-hour intervals)
+        "lang": lang,
     }
 
     try:

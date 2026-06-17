@@ -1,8 +1,34 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query
 from pydantic import BaseModel
 from services.gemini_service import generate_scheme_guide
 
 router = APIRouter()
+
+@router.get("/schemes")
+async def get_schemes_query(
+    request: Request,
+    crop: str = Query("Tomato"),
+    state: str = Query("Maharashtra"),
+    size: str = Query("1-2")
+):
+    """Get government schemes by query params."""
+    all_schemes = getattr(request.app.state, "schemes", [])
+    filtered_schemes = []
+    farmer_state_clean = state.strip().lower()
+
+    for s in all_schemes:
+        states_raw = s.get("states", [])
+        if not states_raw:
+            filtered_schemes.append(s)
+            continue
+            
+        states = [st.lower() for st in states_raw]
+        if "all" not in states and farmer_state_clean not in states:
+            continue
+            
+        filtered_schemes.append(s)
+
+    return {"schemes": filtered_schemes}
 
 class SchemesRequest(BaseModel):
     state: str

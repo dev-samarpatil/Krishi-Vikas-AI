@@ -29,8 +29,8 @@ export default function FarmPage() {
       setLoading(true);
       try {
         const url = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-        // Default to a test farmer ID if none exists in a real app
-        const farmerId = "demo_farmer_123";
+        const ctx = getFarmerContext();
+        const farmerId = ctx.farmer_id || "demo_farmer_123";
         const resp = await fetch(`${url}/api/farm-history?farmer_id=${farmerId}`);
         if (resp.ok) {
           const data = await resp.json();

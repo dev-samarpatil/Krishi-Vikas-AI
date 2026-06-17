@@ -35,10 +35,10 @@ class ClimateAlertRequest(BaseModel):
     language: str = "en"
 
 @router.get("/api/weather")
-async def weather(lat: float = 19.997, lon: float = 73.789):
+async def weather(lat: float = 19.997, lon: float = 73.789, lang: str = "en"):
     """Get current weather + 5-day forecast for given coordinates."""
-    current = await get_current_weather(lat, lon)
-    forecast = await get_5day_forecast(lat, lon)
+    current = await get_current_weather(lat, lon, lang)
+    forecast = await get_5day_forecast(lat, lon, lang)
     return {"current": current, "forecast": forecast}
 
 @router.post("/api/climate-alert")

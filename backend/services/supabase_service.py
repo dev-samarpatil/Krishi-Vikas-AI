@@ -13,7 +13,7 @@ def get_supabase() -> Client | None:
     if _client is not None:
         return _client
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("⚠️  Supabase credentials not set — database features disabled")
+        print("[WARNING] Supabase credentials not set — database features disabled")
         return None
     try:
         _client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -31,6 +31,7 @@ async def save_diagnosis(
     long: float,
     district: str,
     crop_type: str,
+    farm_id: str = "",
     treatment_chosen: str = "",
 ) -> dict | None:
     """Save a diagnosis record to the diagnoses table."""
@@ -50,6 +51,7 @@ async def save_diagnosis(
                     "long": long,
                     "district": district,
                     "crop_type": crop_type,
+                    "farm_id": farm_id if farm_id else None,
                     "treatment_chosen": treatment_chosen,
                 }
             )
@@ -72,6 +74,11 @@ async def log_treatment(
         return None
 
     try:
+        # Update the original diagnosis with the chosen treatment
+        client.table("diagnoses").update(
+            {"treatment_chosen": treatment_type}
+        ).eq("id", diagnosis_id).execute()
+
         # Insert treatment log
         client.table("treatment_logs").insert(
             {
@@ -81,40 +88,26 @@ async def log_treatment(
             }
         ).execute()
 
-        # Calculate score change: organic = +10, chemical = +2
-        score_delta = 10 if treatment_type == "organic" else 2
-
-        # Get current profile
-        profile = (
-            client.table("farmer_profiles")
-            .select("soil_health_score")
-            .eq("id", farmer_id)
-            .maybe_single()
-            .execute()
-        )
-
-        if profile.data:
-            current_score = profile.data.get("soil_health_score", 50)
-            new_score = min(100, current_score + score_delta)
-            client.table("farmer_profiles").update(
-                {"soil_health_score": new_score}
-            ).eq("id", farmer_id).execute()
+        # Recalculate dynamic soil score for the farm
+        farm_id_resp = client.table("diagnoses").select("farm_id").eq("id", diagnosis_id).execute()
+        farm_id = None
+        if farm_id_resp.data and farm_id_resp.data[0].get("farm_id"):
+            farm_id = farm_id_resp.data[0]["farm_id"]
+            
+        new_score = 50
+        badges = []
+        if farm_id:
+            profile = await get_farm_soil_health(farm_id)
+            new_score = profile.get("soil_score", 50)
+            badges = profile.get("badges", [])
         else:
-            new_score = min(100, 50 + score_delta)
-            client.table("farmer_profiles").insert(
-                {"id": farmer_id, "soil_health_score": new_score}
-            ).execute()
-
-        # Check badge milestones
-        badge_earned = None
-        if new_score >= 80:
-            badge_earned = "🌿 Organic Champion"
-        elif new_score >= 60:
-            badge_earned = "🌱 Soil Guardian"
+            profile = await get_farmer_profile(farmer_id)
+            new_score = profile.get("soil_health_score", 50)
+            badges = profile.get("badges", [])
 
         return {
             "new_score": new_score,
-            "badge_earned": badge_earned,
+            "badge_earned": badges[0] if badges else None,
             "treatment_type": treatment_type,
         }
 
@@ -161,24 +154,130 @@ async def set_mandi_cache(state: str, district: str, commodity: str, data: list[
         print(f"Supabase cache set error: {e}")
 
 async def get_farmer_profile(farmer_id: str) -> dict:
-    """Get soil health score and basic profile logic."""
+    """Calculate soil health score dynamically based on diagnosis history."""
     client = get_supabase()
     # Mock data fallback if DB fails
-    mock = {"soil_health_score": 70, "badges": ["🌱 Soil Guardian"]}
+    mock = {"soil_health_score": 60, "badges": ["🌱 Soil Guardian"]}
     if client is None: return mock
     
     try:
-        resp = client.table("farmer_profiles").select("*").eq("id", farmer_id).maybe_single().execute()
-        if not resp.data: return mock
+        score = 60 # Base score
         
-        score = resp.data.get("soil_health_score", 50)
+        # Get history of last 10 diagnoses
+        resp = client.table("diagnoses")\
+            .select("disease_name, treatment_chosen")\
+            .eq("farmer_id", farmer_id)\
+            .order("created_at", desc=True)\
+            .limit(10)\
+            .execute()
+            
+        if resp.data:
+            for diag in resp.data:
+                name = diag.get("disease_name", "").lower()
+                treatment = diag.get("treatment_chosen", "")
+                if treatment:
+                    treatment = treatment.lower()
+                
+                # Deduct based on disease/deficiency type
+                if "deficiency" in name:
+                    if "nitrogen" in name or "phosphorous" in name or "potassium" in name:
+                        score -= 15
+                    else:
+                        score -= 10
+                elif "blight" in name or "rust" in name or "virus" in name or "wilt" in name:
+                    score -= 10
+                elif "pest" in name or "borer" in name or "hopper" in name or "mite" in name or "aphid" in name:
+                    score -= 5
+                else:
+                    score -= 2 # Generic penalty
+                    
+                # Add based on treatment
+                if treatment == "organic":
+                    score += 10
+                elif treatment == "chemical":
+                    score += 2
+                    
+        # Clamp score between 10 and 100
+        score = max(10, min(100, score))
+        
         badges = []
         if score >= 80: badges.append("🌿 Organic Champion")
         elif score >= 60: badges.append("🌱 Soil Guardian")
         
+        # Save updated score back to profile
+        try:
+            profile_resp = client.table("farmer_profiles").select("id").eq("id", farmer_id).maybe_single().execute()
+            if profile_resp.data:
+                client.table("farmer_profiles").update({"soil_health_score": score}).eq("id", farmer_id).execute()
+            else:
+                client.table("farmer_profiles").insert({"id": farmer_id, "soil_health_score": score}).execute()
+        except:
+            pass
+
         return {"soil_health_score": score, "badges": badges}
     except Exception as e:
         print(f"Supabase get_farmer_profile error: {e}")
+        return mock
+
+async def get_farm_soil_health(farm_id: str) -> dict:
+    """Calculate soil health score dynamically based on diagnosis history for a specific farm."""
+    client = get_supabase()
+    mock = {"soil_score": 60, "badges": ["🌱 Soil Guardian"]}
+    if client is None: return mock
+    
+    try:
+        score = 60 # Base score
+        
+        # Get history of last 10 diagnoses for this farm
+        resp = client.table("diagnoses")\
+            .select("disease_name, treatment_chosen")\
+            .eq("farm_id", farm_id)\
+            .order("created_at", desc=True)\
+            .limit(10)\
+            .execute()
+            
+        if resp.data:
+            for diag in resp.data:
+                name = diag.get("disease_name", "").lower()
+                treatment = diag.get("treatment_chosen", "")
+                if treatment:
+                    treatment = treatment.lower()
+                
+                # Deduct based on disease/deficiency type
+                if "deficiency" in name:
+                    if "nitrogen" in name or "phosphorous" in name or "potassium" in name:
+                        score -= 15
+                    else:
+                        score -= 10
+                elif "blight" in name or "rust" in name or "virus" in name or "wilt" in name:
+                    score -= 10
+                elif "pest" in name or "borer" in name or "hopper" in name or "mite" in name or "aphid" in name:
+                    score -= 5
+                else:
+                    score -= 2 # Generic penalty
+                    
+                # Add based on treatment
+                if treatment == "organic":
+                    score += 10
+                elif treatment == "chemical":
+                    score += 2
+                    
+        # Clamp score between 10 and 100
+        score = max(10, min(100, score))
+        
+        badges = []
+        if score >= 80: badges.append("🌿 Organic Champion")
+        elif score >= 60: badges.append("🌱 Soil Guardian")
+        
+        # Save updated score back to the farm
+        try:
+            client.table("farms").update({"soil_score": score}).eq("id", farm_id).execute()
+        except:
+            pass
+
+        return {"soil_score": score, "badges": badges}
+    except Exception as e:
+        print(f"Supabase get_farm_soil_health error: {e}")
         return mock
 
 async def get_farm_history(farmer_id: str) -> list[dict]:

@@ -3,8 +3,8 @@
 import { useLanguage } from "@/context/LanguageContext";
 
 interface MapTogglesProps {
-  activeLayer: "disease" | "soil";
-  setActiveLayer: (layer: "disease" | "soil") => void;
+  activeLayer: "disease" | "climate";
+  setActiveLayer: (layer: "disease" | "climate") => void;
 }
 
 export default function MapToggles({ activeLayer, setActiveLayer }: MapTogglesProps) {
@@ -23,9 +23,9 @@ export default function MapToggles({ activeLayer, setActiveLayer }: MapTogglesPr
         Disease Outbreak
       </button>
       <button
-        onClick={() => setActiveLayer("soil")}
+        onClick={() => setActiveLayer("climate")}
         className={`px-3.5 py-1.5 rounded-full text-[10px] font-bold transition-colors ${
-          activeLayer === "soil"
+          activeLayer === "climate"
             ? "bg-blue-700 text-white"
             : "bg-transparent text-slate-400"
         }`}

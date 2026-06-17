@@ -76,6 +76,34 @@ interface WeatherWidgetProps {
   } | null;
 }
 
+const getClimateAlertMessage = (weather: {
+  temp: number
+  humidity: number  
+  description: string
+  wind: number
+}) => {
+  const { temp, humidity, description, wind } = weather
+  
+  if (description?.toLowerCase().includes('haze') || 
+      description?.toLowerCase().includes('smoke')) {
+    return '🌫️ Haze detected — avoid spraying pesticides today. Poor visibility affects coverage.'
+  }
+  if (temp > 38) {
+    return `🌡️ Heat stress alert (${temp}°C) — irrigate crops early morning before 8am today.`
+  }
+  if (humidity > 78) {
+    return `💧 High humidity (${humidity}%) — fungal disease risk. Apply preventive fungicide spray.`
+  }
+  if (wind > 25) {
+    return `💨 Strong winds (${wind} km/h) — do not spray pesticides. Wait for calm weather.`
+  }
+  if (temp < 10) {
+    return `❄️ Cold weather (${temp}°C) — protect sensitive crops from frost damage tonight.`
+  }
+  // Default — show something useful always
+  return `☀️ ${temp}°C, ${humidity}% humidity — good conditions for field work today.`
+}
+
 export default function WeatherWidget({ climateAlert }: WeatherWidgetProps) {
   const [data, setData] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,16 +200,16 @@ export default function WeatherWidget({ climateAlert }: WeatherWidgetProps) {
       </div>
 
       {/* Climate Alert Strip */}
-      {climateAlert && climateAlert.alert_level && (
-        <div className={`mt-3 p-3 rounded-xl border flex gap-2 items-start text-xs ${
-          climateAlert.alert_level === 'urgent' 
-            ? 'bg-red-500/20 border-red-400 text-white' 
-            : 'bg-amber-500/20 border-amber-400 text-white'
-        }`}>
-           <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${climateAlert.alert_level === 'urgent' ? 'text-red-200' : 'text-amber-200'}`} />
-           <p className="leading-snug">{climateAlert.message}</p>
-        </div>
-      )}
+      <div className="mt-3 p-3 rounded-xl flex gap-2 items-start text-xs bg-black/20 text-white">
+        <p className="leading-snug">
+          {getClimateAlertMessage({
+            temp: current.temp_c,
+            humidity: current.humidity,
+            description: current.description,
+            wind: current.wind_speed_kmh
+          })}
+        </p>
+      </div>
 
       {/* 5-day forecast */}
       {forecast && forecast.length > 0 && (

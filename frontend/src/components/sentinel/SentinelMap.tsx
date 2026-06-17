@@ -96,13 +96,21 @@ function ChangeView({ center }: { center: [number, number] }) {
 }
 
 export default function SentinelMap() {
-  const [activeLayer, setActiveLayer] = useState<"disease" | "soil">("disease");
+  const [activeLayer, setActiveLayer] = useState<"disease" | "climate">("disease");
   const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
   const { t } = useLanguage();
   
   const ctx = getFarmerContext();
-  const [mapCenter, setMapCenter] = useState<[number, number]>([ctx.lat || 19.99, ctx.long || 73.79]);
-  const [clusters, setClusters] = useState<Cluster[]>(generateDemoClusters(ctx.lat || 19.99, ctx.long || 73.79));
+  const [mapCenter, setMapCenter] = useState<[number, number]>(() => {
+    const lat = parseFloat(localStorage.getItem('kv_lat') || '19.99');
+    const lng = parseFloat(localStorage.getItem('kv_lng') || '73.79');
+    return [lat, lng];
+  });
+  const [clusters, setClusters] = useState<Cluster[]>(() => {
+    const lat = parseFloat(localStorage.getItem('kv_lat') || '19.99');
+    const lng = parseFloat(localStorage.getItem('kv_lng') || '73.79');
+    return generateDemoClusters(lat, lng);
+  });
   const [weatherData, setWeatherData] = useState<any>(null);
 
   useEffect(() => {
@@ -110,64 +118,94 @@ export default function SentinelMap() {
       const data = localStorage.getItem('kv_weather');
       if (data) setWeatherData(JSON.parse(data));
     } catch(err) {}
+
+    const fetchClusters = async () => {
+      try {
+        const url = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const resp = await fetch(`${url}/api/map-clusters`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.clusters && data.clusters.length > 0) {
+            const mapped = data.clusters.map((c: any) => ({
+              disease_name: c.disease_name,
+              count: c.count,
+              lat: c.lat,
+              long: c.long || c.lng,
+              radius_km: c.radius_km || 15,
+              colorClass: c.count >= 5 ? "red" : c.count >= 3 ? "orange" : "amber"
+            }));
+            setClusters(mapped);
+            return true;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch map clusters:", err);
+      }
+      return false;
+    };
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
           setMapCenter([lat, lng]);
-          setClusters(generateDemoClusters(lat, lng));
+          const success = await fetchClusters();
+          if (!success) {
+            setClusters(generateDemoClusters(lat, lng));
+          }
         },
-        (error) => {
+        async (error) => {
           console.error("GPS error:", error);
-          setMapCenter([19.99, 73.79]);
-          setClusters(generateDemoClusters(19.99, 73.79));
+          await fetchClusters();
+        },
+        { 
+          timeout: 6000,
+          maximumAge: 600000,
+          enableHighAccuracy: false
         }
       );
+    } else {
+      fetchClusters();
     }
   }, []);
 
-  const getClimateRisk = (weather: any) => {
-    const temp = weather?.temp || 28
-    const humidity = weather?.humidity || 50
-    const windSpeed = weather?.wind || 10
-    
+  const getClimateRisks = (temp: number, humidity: number, wind: number, description: string) => {
     const risks = []
     
-    if (temp > 38) {
+    if (description?.toLowerCase().includes('haze')) {
       risks.push({
-        level: 'high',
-        icon: '🌡️',
+        level: 'medium', icon: '🌫️',
+        title: 'Haze Conditions',
+        advice: 'Avoid pesticide spraying today. Poor air quality affects crop absorption.'
+      })
+    }
+    if (temp > 35) {
+      risks.push({
+        level: 'high', icon: '🌡️',
         title: 'Heat Stress Risk',
-        advice: 'Temperature above 38°C. Irrigate crops early morning. Avoid spraying pesticides today.',
-        color: 'border-red-500'
+        advice: `${temp}°C is stressful for crops. Irrigate before 8am. Avoid field work 11am-4pm.`
       })
     }
     if (humidity > 75) {
       risks.push({
-        level: 'medium',
-        icon: '💧',
-        title: 'Fungal Disease Risk',
-        advice: `High humidity (${humidity}%). Spray preventive fungicide. Ensure proper crop spacing for airflow.`,
-        color: 'border-amber-400'
+        level: 'medium', icon: '💧',
+        title: 'Fungal Disease Risk', 
+        advice: `Humidity at ${humidity}%. Conditions ideal for fungal spread. Apply Mancozeb preventively.`
       })
     }
-    if (windSpeed > 25) {
+    if (wind > 20) {
       risks.push({
-        level: 'medium',
-        icon: '💨',
-        title: 'Avoid Spraying Today',
-        advice: 'Wind speed too high for pesticide application. Wait for calm morning hours.',
-        color: 'border-amber-400'
+        level: 'medium', icon: '💨',
+        title: 'High Wind — No Spraying',
+        advice: `${wind} km/h winds. Pesticide will drift. Wait for early morning calm conditions.`
       })
     }
     if (risks.length === 0) {
       risks.push({
-        level: 'low',
-        icon: '✅',
-        title: 'Weather Conditions Normal',
-        advice: 'No immediate climate risk. Good conditions for field work and spraying.',
-        color: 'border-green-500'
+        level: 'low', icon: '✅',
+        title: 'Good Farming Conditions',
+        advice: `${temp}°C, ${humidity}% humidity. Ideal for spraying, harvesting, and field work today.`
       })
     }
     return risks
@@ -238,29 +276,33 @@ export default function SentinelMap() {
       </div>
 
       {/* Climate Risk Card */}
-      {activeLayer === "soil" && (() => {
-        const risks = getClimateRisk(weatherData);
-        return (
-          <div className="bg-white rounded-t-2xl p-5 absolute bottom-0 left-0 right-0 z-[1000] shadow-[0_-10px_40px_rgba(0,0,0,0.15)] pb-8">
-            <h2 className="text-lg font-bold text-gray-900 mb-2 border-b border-gray-100 pb-2">
-              Climate Risk &mdash; {ctx.district || "Nashik"}
-            </h2>
-            
-            <p className="text-xs text-gray-500 text-center mb-3">
-              📍 {ctx.district || "Pune"} | {weatherData?.temp || 28}°C | Humidity {weatherData?.humidity || 52}% | Wind {weatherData?.wind || 13} km/h
-            </p>
+      {activeLayer === "climate" && (() => {
+        // Support both direct attributes and nested "current" layout from /api/weather
+        const temp = weatherData?.current?.temp_c || weatherData?.temp || 28;
+        const humidity = weatherData?.current?.humidity || weatherData?.humidity || 50;
+        const wind = weatherData?.current?.wind_speed_kmh || weatherData?.wind || 10;
+        const description = weatherData?.current?.description || weatherData?.description || "";
+        const district = ctx.district || "Pune";
+        const climateRisks = getClimateRisks(temp, humidity, wind, description);
 
-            <div className="space-y-2 text-sm font-medium max-h-[40vh] overflow-y-auto no-scrollbar pb-4">
-              {risks.map((risk, i) => (
-                <div key={i} className={`bg-white rounded-2xl p-4 mb-2 border-l-4 ${risk.color} border border-gray-100 shadow-sm`}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{risk.icon}</span>
-                    <span className="font-bold text-sm text-gray-900">{risk.title}</span>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-1">{risk.advice}</p>
-                </div>
-              ))}
+        return (
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl p-4 z-[1000] shadow-[0_-4px_20px_rgba(0,0,0,0.15)]">
+            <div className="text-xs text-gray-500 text-center mb-3 font-medium">
+              📍 {district} · {temp}°C · Humidity {humidity}% · Wind {wind} km/h
             </div>
+            
+            {climateRisks.map((risk, i) => (
+              <div key={i} className={`flex gap-3 p-3 rounded-xl mb-2 
+                ${risk.level === 'high' ? 'bg-red-50 border-l-4 border-red-500' :
+                  risk.level === 'medium' ? 'bg-amber-50 border-l-4 border-amber-400' :
+                  'bg-green-50 border-l-4 border-green-500'}`}>
+                <span className="text-xl">{risk.icon}</span>
+                <div>
+                  <div className="text-xs font-bold text-gray-900">{risk.title}</div>
+                  <div className="text-xs text-gray-600 mt-0.5">{risk.advice}</div>
+                </div>
+              </div>
+            ))}
           </div>
         );
       })()}

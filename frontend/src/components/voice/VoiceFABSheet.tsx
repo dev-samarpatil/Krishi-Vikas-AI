@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { LucideIcon, Mic, X, Loader2, Volume2 } from "lucide-react";
 import { getFarmerContext } from "@/lib/farmer-context";
 import { useLanguage } from "@/context/LanguageContext";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const window: any;
@@ -136,68 +137,167 @@ export default function VoiceFABSheet({
 
 
 
-  const getAIReply = async (transcript: string): Promise<string> => {
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY
-    if (!apiKey) return "AI not configured. Check API key."
-
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash-latest"
-    })
-
-    const district = localStorage.getItem('kv_district') || 'India'
-    const crop = localStorage.getItem('kv_crop') || 'crops'
-    const language = localStorage.getItem('kv_language') || 'en'
-    const langMap: Record<string, string> = {
-      en: "English", hi: "Hindi",
-      mr: "Marathi", ta: "Tamil"
-    }
-    const lang = langMap[language] || "English"
-
-    const prompt = `You are Krishi Vikas AI farming assistant.
-Answer in ${lang} language. Simple words. Max 3 sentences.
-Farmer: ${district}. Crop: ${crop}.
-Question: ${transcript}
-Give practical farming advice directly.`
-
-    const result = await model.generateContent(prompt)
-    return result.response.text()
-  }
-
-  const handleVoiceQuery = async (messageText: string, lang: string) => {
-    try {
-      setVoiceState("PROCESSING");
-      const reply = await getAIReply(messageText);
-
-      addMessage("bot", reply);
-
-      // Speak reply
+  const processTts = async (text: string, lang: string) => {
+    if (lang === "en") {
       if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.cancel()
-        const language = localStorage.getItem('kv_language') || 'en'
-        const utterance = new SpeechSynthesisUtterance(reply)
-        utterance.lang = language === 'hi' ? 'hi-IN' :
-          language === 'mr' ? 'mr-IN' :
-            language === 'ta' ? 'ta-IN' : 'en-IN'
-        utterance.rate = 0.9
-
+        setVoiceState("SPEAKING");
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "en-IN";
         utterance.onend = () => {
+          setVoiceState("IDLE");
+        };
+        window.speechSynthesis.speak(utterance);
+      } else {
+        setVoiceState("IDLE");
+      }
+      return;
+    }
+
+    try {
+      console.log("[TTS] Requesting TTS for lang:", lang, "text length:", text.length);
+      const res = await fetch(`${API_BASE}/api/voice-tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language: lang }),
+      });
+
+      console.log("[TTS] Response Status:", res.status);
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "unknown");
+        console.error(`[TTS] Backend error: ${res.status} — ${errBody}`);
+        throw new Error(`TTS failed: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      console.log("[TTS] Response Data Keys:", Object.keys(data));
+
+      if (data.audios && data.audios.length > 0) {
+        const base64Audio = data.audios[0];
+        console.log("[TTS] Audio data received, length:", base64Audio.length, "- attempting playback...");
+
+        const audio = new Audio(`data:audio/wav;base64,${base64Audio}`);
+        audio.onended = () => {
+          console.log("[TTS] Audio playback finished");
           setVoiceState("IDLE");
         };
 
         setVoiceState("SPEAKING");
-        window.speechSynthesis.speak(utterance)
+
+        try {
+          await audio.play();
+          console.log("[TTS] Audio playing successfully");
+        } catch (playErr) {
+          console.error("[TTS] WAV play failed, trying MPEG fallback:", playErr);
+          audio.src = `data:audio/mpeg;base64,${base64Audio}`;
+          try {
+            await audio.play();
+            console.log("[TTS] Audio playing with MPEG fallback");
+          } catch (fallbackErr) {
+            console.error("[TTS] All playback attempts failed:", fallbackErr);
+            setVoiceState("IDLE");
+          }
+        }
       } else {
+        console.error("[TTS] No audio data found in response:", data);
         setVoiceState("IDLE");
       }
-    } catch (err: any) {
-      console.error("Voice error:", err)
-      const msg = err?.message || ""
-      const reply = msg.includes('429') || msg.includes('quota')
-        ? "AI is busy. Please try in 1-2 minutes. 🙏"
-        : "Sorry, please try again."
+    } catch (err) {
+      console.error("[TTS] TTS generation error:", err);
+      setVoiceState("IDLE");
+    }
+  };
+
+  const getVoiceReply = async (transcript: string, lang: string): Promise<string> => {
+    const ctx = getFarmerContext();
+    const district = ctx.district || localStorage.getItem("kv_district") || "Maharashtra";
+    const crop = localStorage.getItem("kv_crop") || ctx.crop_types?.[0] || "crops";
+
+    // METHOD 1: Try Groq via backend /api/chat
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(`${API_BASE}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: transcript,
+          language: lang,
+          lat: ctx.lat ?? 19.997,
+          long: ctx.long ?? 73.789,
+          crop: crop,
+          last_diagnosis: ctx.last_diagnosis || "",
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log("[Voice] Backend replied:", data);
+        return data.reply || data.response || data.message || "";
+      } else {
+        const errBody = await res.text().catch(() => "unknown");
+        console.warn(`[Voice] Backend /api/chat returned ${res.status}: ${errBody}`);
+      }
+    } catch (backendErr: any) {
+      if (backendErr.name !== "AbortError") {
+        console.log("[Voice] Backend chat failed, trying Gemini direct:", backendErr.message);
+      } else {
+        console.log("[Voice] Backend chat timed out, trying Gemini direct");
+      }
+    }
+
+    // METHOD 2: Fallback — Gemini direct from frontend
+    try {
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("No Gemini key");
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const langNames: Record<string, string> = {
+        en: "English", hi: "Hindi", mr: "Marathi", ta: "Tamil",
+      };
+      const langName = langNames[lang] || "English";
+
+      const result = await model.generateContent(
+        `You are Krishi Vikas AI farming assistant.
+Answer in ${langName} language. Simple words. Max 3 sentences.
+Farmer is in ${district}, growing ${crop}.
+Question: ${transcript}
+Give specific practical farming advice.`
+      );
+      console.log("[Voice] Gemini fallback replied");
+      return result.response.text();
+    } catch (geminiErr) {
+      console.error("[Voice] Both methods failed:", geminiErr);
+      throw new Error("Both backend and Gemini failed");
+    }
+  };
+
+  const handleVoiceQuery = async (messageText: string, lang: string) => {
+    if (!messageText.trim()) return;
+
+    try {
+      setVoiceState("PROCESSING");
+
+      const reply = await getVoiceReply(messageText, lang);
 
       addMessage("bot", reply);
+      await processTts(reply, lang);
+    } catch (err: any) {
+      console.error("Voice reply failed:", err);
+      const errorReply =
+        lang === "mr"
+          ? "माफ करा, पुन्हा प्रयत्न करा."
+          : lang === "hi"
+          ? "माफ करें, दोबारा कोशिश करें।"
+          : "Sorry, please try again.";
+
+      addMessage("bot", errorReply);
       setVoiceState("IDLE");
     }
   };

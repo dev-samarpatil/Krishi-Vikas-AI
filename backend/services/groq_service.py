@@ -70,8 +70,10 @@ async def chat_with_farmer(
     
     if not client:
         print("GROQ_API_KEY not configured. Returning fallback response.")
+        fallback_msg = "I am having trouble connecting to my AI brain right now. Please try again later."
         return {
-            "reply": "I am having trouble connecting to my AI brain right now. Please try again later.",
+            "reply": fallback_msg,
+            "response": fallback_msg,
             "intent_type": "general"
         }
 
@@ -109,7 +111,7 @@ async def chat_with_farmer(
                     "content": message
                 }
             ],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             temperature=0.4,
             max_tokens=300,
         )
@@ -118,6 +120,7 @@ async def chat_with_farmer(
         
         return {
             "reply": reply_text,
+            "response": reply_text,
             "intent_type": "general" # Can be evolved with a classifier if needed
         }
         
@@ -130,18 +133,21 @@ async def chat_with_farmer(
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": message}
                 ],
-                model="llama3-8b-8192",
+                model="llama-3.1-8b-instant",
                 temperature=0.4,
                 max_tokens=300,
             )
             reply_text = response.choices[0].message.content.strip() if response.choices else "Sorry, I couldn't process that."
             return {
                 "reply": reply_text,
+                "response": reply_text,
                 "intent_type": "general"
             }
         except Exception as e2:
             print(f"Groq API Error with fallback model: {e2}")
+            error_msg = "Service temporarily unavailable due to a network glitch. Try again soon."
             return {
-                "reply": "Service temporarily unavailable due to a network glitch. Try again soon.",
+                "reply": error_msg,
+                "response": error_msg,
                 "intent_type": "error"
             }

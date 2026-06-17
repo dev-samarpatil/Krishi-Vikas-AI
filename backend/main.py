@@ -22,39 +22,39 @@ async def lifespan(app: FastAPI):
     # ── Verify API keys on startup ──────────────────────────────────
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        print(f"✅ GEMINI_API_KEY loaded: {api_key[:8]}...")
+        print(f"[OK] GEMINI_API_KEY loaded: {api_key[:8]}...")
     else:
-        print("❌ GEMINI_API_KEY NOT FOUND — check your .env file!")
+        print("[ERROR] GEMINI_API_KEY NOT FOUND — check your .env file!")
 
     groq_key = os.getenv("GROQ_API_KEY")
-    print(f"✅ GROQ_API_KEY: {'loaded' if groq_key else '❌ MISSING'}")
+    print(f"[OK] GROQ_API_KEY: {'loaded' if groq_key else '[ERROR] MISSING'}")
 
     sarvam_key = os.getenv("SARVAM_API_KEY")
-    print(f"✅ SARVAM_API_KEY: {'loaded' if sarvam_key else '❌ MISSING'}")
+    print(f"[OK] SARVAM_API_KEY: {'loaded' if sarvam_key else '[ERROR] MISSING'}")
 
-    print("\n🌱 Krishi Vikas AI — Loading data files...")
+    print("\n[START] Krishi Vikas AI — Loading data files...")
 
     # 1. Soil mapping
     soil_path = os.path.join(DATA_DIR, "soil_mapping.json")
     with open(soil_path, encoding="utf-8") as f:
         app.state.soil = json.load(f)
-    print(f"   ✅ soil_mapping.json loaded ({len(app.state.soil)} states)")
+    print(f"   [OK] soil_mapping.json loaded ({len(app.state.soil)} states)")
 
     # 2. Crop calendar
     calendar_path = os.path.join(DATA_DIR, "crop_calendar.json")
     with open(calendar_path, encoding="utf-8") as f:
         app.state.calendar = json.load(f)
-    print(f"   ✅ crop_calendar.json loaded ({len(app.state.calendar)} regions)")
+    print(f"   [OK] crop_calendar.json loaded ({len(app.state.calendar)} regions)")
 
     # 3. Government schemes
     schemes_path = os.path.join(DATA_DIR, "schemes.json")
     if os.path.exists(schemes_path):
         with open(schemes_path, encoding="utf-8") as f:
             app.state.schemes = json.load(f)
-        print(f"   ✅ Loaded {len(app.state.schemes)} schemes")
+        print(f"   [OK] Loaded {len(app.state.schemes)} schemes")
     else:
         app.state.schemes = []
-        print("   ⚠️  schemes.json not found")
+        print("   [WARNING] schemes.json not found")
 
     # 5. KVK directory — aggregate all state-wise JSON files
     kvk_dir = os.path.join(DATA_DIR, "KVK")
@@ -64,21 +64,21 @@ async def lifespan(app: FastAPI):
             kvks = json.load(f)
             all_kvks.extend(kvks)
     app.state.kvk = all_kvks
-    print(f"   ✅ KVK directory loaded ({len(all_kvks)} KVKs across India)")
+    print(f"   [OK] KVK directory loaded ({len(all_kvks)} KVKs across India)")
 
     # 6. Mandi prices (static fallback)
     mandi_path = os.path.join(DATA_DIR, "mandi_prices.json")
     if os.path.exists(mandi_path):
         with open(mandi_path, encoding="utf-8") as f:
             app.state.mandi_prices = json.load(f)
-        print(f"   ✅ mandi_prices.json loaded")
+        print(f"   [OK] mandi_prices.json loaded")
     else:
         app.state.mandi_prices = []
-        print("   ⚠️  mandi_prices.json not found — using empty fallback")
+        print("   [WARNING] mandi_prices.json not found — using empty fallback")
 
-    print("🚀 All data loaded. Server ready!\n")
+    print("[READY] All data loaded. Server ready!\n")
     yield
-    print("🛑 Shutting down Krishi Vikas AI backend.")
+    print("[STOP] Shutting down Krishi Vikas AI backend.")
 
 
 app = FastAPI(
@@ -91,9 +91,7 @@ app = FastAPI(
 # CORS — allow frontend to call backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-        "https://krishi-vikas-ai.vercel.app",
-        "https://*.vercel.app"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -127,7 +125,7 @@ async def health_check():
 async def test_gemini():
     try:
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content("Say hello in one word")
         return {"status": "ok", "response": response.text}
     except Exception as e:
@@ -139,7 +137,7 @@ async def test_gemini():
 async def test_vision(image: UploadFile = File(...)):
     try:
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
 
         # Read image bytes
         image_bytes = await image.read()
@@ -188,6 +186,15 @@ async def log_diagnosis(data: dict):
         return {"status": "saved"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@app.post("/push/register")
+@app.post("/api/push/register")
+async def register_push_token(data: dict):
+    token = data.get("token")
+    user_id = data.get("user_id", "guest")
+    print(f"[FCM Push] Registering token: {token} for user: {user_id}")
+    return {"status": "registered", "token": token}
 
 
 # ── Register API routes ──────────────────────────────────────────────

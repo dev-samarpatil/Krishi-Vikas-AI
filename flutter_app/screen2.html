@@ -1,0 +1,248 @@
+<!DOCTYPE html><html class="light" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Krishi Vikas AI - Language Selection</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-container": "#65b68e",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-fixed": "#002114",
+                        "surface": "#f8f9fa",
+                        "tertiary": "#002d1b",
+                        "surface-tint": "#3f6653",
+                        "on-tertiary-fixed-variant": "#005236",
+                        "on-primary-container": "#86af99",
+                        "tertiary-fixed-dim": "#86d7ad",
+                        "secondary-fixed": "#ffdcbd",
+                        "primary-fixed": "#c1ecd4",
+                        "surface-dim": "#d9dadb",
+                        "outline": "#717973",
+                        "on-primary": "#ffffff",
+                        "tertiary-container": "#00452d",
+                        "secondary-container": "#ffca98",
+                        "primary": "#012d1d",
+                        "surface-container-high": "#e7e8e9",
+                        "on-surface-variant": "#414844",
+                        "on-surface": "#191c1d",
+                        "on-background": "#191c1d",
+                        "secondary-fixed-dim": "#f0bd8b",
+                        "inverse-on-surface": "#f0f1f2",
+                        "on-secondary-container": "#7a532a",
+                        "surface-container-low": "#f3f4f5",
+                        "primary-container": "#1b4332",
+                        "on-error": "#ffffff",
+                        "surface-bright": "#f8f9fa",
+                        "error-container": "#ffdad6",
+                        "secondary": "#7d562d",
+                        "surface-container": "#edeeef",
+                        "primary-fixed-dim": "#a5d0b9",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#a1f4c8",
+                        "outline-variant": "#c1c8c2",
+                        "surface-container-highest": "#e1e3e4",
+                        "background": "#f8f9fa",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-secondary-fixed": "#2c1600",
+                        "inverse-surface": "#2e3132",
+                        "on-primary-fixed-variant": "#274e3d",
+                        "inverse-primary": "#a5d0b9",
+                        "on-tertiary-fixed": "#002113",
+                        "surface-variant": "#e1e3e4",
+                        "on-secondary-fixed-variant": "#623f18",
+                        "on-error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "0.5rem",
+                        "section-padding": "2rem",
+                        "gutter": "1rem",
+                        "container-margin": "1.25rem",
+                        "stack-lg": "1.5rem",
+                        "stack-md": "1rem"
+                    },
+                    "fontFamily": {
+                        "label-md": ["Inter"],
+                        "headline-lg-mobile": ["Plus Jakarta Sans"],
+                        "label-lg": ["Inter"],
+                        "headline-sm": ["Plus Jakarta Sans"],
+                        "headline-md": ["Plus Jakarta Sans"],
+                        "body-md": ["Inter"],
+                        "headline-lg": ["Plus Jakarta Sans"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-md": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                        "headline-lg-mobile": ["26px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "label-lg": ["14px", { "lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600" }],
+                        "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "700" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.fill-icon {
+            font-variation-settings: 'FILL' 1;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface antialiased flex flex-col min-h-screen md:max-w-md md:mx-auto md:shadow-xl md:my-8 md:rounded-[32px] md:border md:border-outline-variant md:overflow-hidden relative">
+<!-- Header -->
+<header class="flex justify-between items-center px-container-margin py-stack-md bg-surface sticky top-0 z-10">
+<div class="flex items-center space-x-2">
+<button aria-label="Go back" class="p-2 -ml-2 rounded-full hover:bg-surface-container transition-colors focus:outline-none focus:ring-2 focus:ring-primary-container">
+<span class="material-symbols-outlined text-on-surface-variant">arrow_back</span>
+</button>
+<h1 class="font-headline-sm text-headline-sm text-on-surface">Farm Setup</h1>
+</div>
+<div class="flex items-center space-x-1">
+<span class="font-label-md text-label-md text-on-surface-variant">Step 1 of 3</span>
+<div class="flex space-x-1 ml-2">
+<div class="h-2 w-4 bg-primary-container rounded-full"></div>
+<div class="h-2 w-2 bg-surface-container-highest rounded-full"></div>
+<div class="h-2 w-2 bg-surface-container-highest rounded-full"></div>
+</div>
+</div>
+</header>
+<!-- Main Content -->
+<main class="flex-grow px-container-margin py-section-padding flex flex-col relative z-0">
+<!-- Decorative Image Context (using provided image conceptually, perhaps as a subtle header background or illustrative element if appropriate, but prompt asks for a clean list. Will use it as a hero illustration at the top) -->
+
+<div class="mb-stack-lg">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface mb-stack-sm">Select App Language<br><span class="text-primary-container">भाषा निवडा</span></h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Choose your preferred language for calculations and diagnosis.</p>
+</div>
+<!-- Language Options -->
+<div class="space-y-stack-sm flex-grow">
+<!-- English (Selected) -->
+<label class="flex items-center justify-between p-4 rounded-xl border-2 border-primary-container bg-surface-container-lowest shadow-sm cursor-pointer transition-all hover:bg-primary-fixed/10 group">
+<div class="flex items-center space-x-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface-variant">public</span>
+</div>
+<div>
+<span class="block font-label-lg text-label-lg text-on-surface">English</span>
+<span class="block font-label-md text-label-md text-on-surface-variant">English</span>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<span class="material-symbols-outlined fill-icon text-primary-container">check_circle</span>
+<input checked="" class="hidden" name="language" type="radio" value="english">
+</div>
+</label>
+<!-- Hindi -->
+<label class="flex items-center justify-between p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm cursor-pointer transition-all hover:border-primary-container hover:bg-surface focus-within:ring-2 focus-within:ring-primary-container">
+<div class="flex items-center space-x-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface-variant">translate</span>
+</div>
+<div>
+<span class="block font-label-lg text-label-lg text-on-surface">हिन्दी</span>
+<span class="block font-label-md text-label-md text-on-surface-variant">Hindi</span>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<input class="form-radio h-5 w-5 text-primary-container border-outline-variant focus:ring-primary-container" name="language" type="radio" value="hindi">
+</div>
+</label>
+<!-- Marathi -->
+<label class="flex items-center justify-between p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm cursor-pointer transition-all hover:border-primary-container hover:bg-surface focus-within:ring-2 focus-within:ring-primary-container">
+<div class="flex items-center space-x-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface-variant">translate</span>
+</div>
+<div>
+<span class="block font-label-lg text-label-lg text-on-surface">मराठी</span>
+<span class="block font-label-md text-label-md text-on-surface-variant">Marathi</span>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<input class="form-radio h-5 w-5 text-primary-container border-outline-variant focus:ring-primary-container" name="language" type="radio" value="marathi">
+</div>
+</label>
+<!-- Tamil -->
+<label class="flex items-center justify-between p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm cursor-pointer transition-all hover:border-primary-container hover:bg-surface focus-within:ring-2 focus-within:ring-primary-container">
+<div class="flex items-center space-x-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface-variant">translate</span>
+</div>
+<div>
+<span class="block font-label-lg text-label-lg text-on-surface">தமிழ்</span>
+<span class="block font-label-md text-label-md text-on-surface-variant">Tamil</span>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<input class="form-radio h-5 w-5 text-primary-container border-outline-variant focus:ring-primary-container" name="language" type="radio" value="tamil">
+</div>
+</label>
+</div>
+</main>
+<!-- Fixed Footer Action -->
+<div class="p-container-margin bg-surface-container-lowest border-t border-surface-variant sticky bottom-0 z-10 w-full md:rounded-b-[32px]">
+<button class="w-full bg-primary-container text-on-primary font-label-lg text-label-lg py-3 px-6 rounded-full shadow-sm hover:shadow-md hover:bg-primary transition-all active:scale-95 flex items-center justify-center space-x-2">
+<span class="">Next</span>
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</div>
+<script>
+        // Simple script to handle radio selection visual update
+        document.querySelectorAll('input[type="radio"][name="language"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                // Reset all labels
+                document.querySelectorAll('label').forEach(label => {
+                    label.classList.remove('border-2', 'border-primary-container', 'bg-surface-container-lowest');
+                    label.classList.add('border', 'border-outline-variant', 'bg-surface-container-lowest');
+                    
+                    // Remove check icon if present
+                    const checkIcon = label.querySelector('.material-symbols-outlined.fill-icon');
+                    if (checkIcon) {
+                        checkIcon.remove();
+                        // re-add radio input
+                        const inputContainer = label.querySelector('.flex.items-center.space-x-3');
+                        if(inputContainer.children.length === 1 && inputContainer.children[0].tagName === 'INPUT') {
+                            inputContainer.children[0].classList.remove('hidden');
+                            inputContainer.children[0].classList.add('form-radio', 'h-5', 'w-5', 'text-primary-container', 'border-outline-variant', 'focus:ring-primary-container');
+                        }
+                    }
+                });
+
+                // Style selected label
+                const selectedLabel = this.closest('label');
+                selectedLabel.classList.remove('border', 'border-outline-variant');
+                selectedLabel.classList.add('border-2', 'border-primary-container', 'bg-surface-container-lowest');
+                
+                // Hide radio, show check icon
+                this.classList.remove('form-radio', 'h-5', 'w-5', 'text-primary-container', 'border-outline-variant', 'focus:ring-primary-container');
+                this.classList.add('hidden');
+                
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'material-symbols-outlined fill-icon text-primary-container';
+                iconSpan.textContent = 'check_circle';
+                this.parentElement.insertBefore(iconSpan, this);
+            });
+        });
+    </script>
+
+
+</body></html>

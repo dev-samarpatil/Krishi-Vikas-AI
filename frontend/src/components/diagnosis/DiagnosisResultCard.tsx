@@ -57,27 +57,37 @@ export default function DiagnosisResultCard({
   const lowConfidence = confidence < 0.70;
   const urgency = getUrgencyLabel(result.urgency || "monitor");
 
+  // KVK Section Logic
+  const kvkTitle = confidence >= 0.80 
+    ? "📞 Verify with Expert (Optional)" 
+    : confidence >= 0.60 
+      ? "📞 Consult Expert — Recommended" 
+      : "📞 Expert Consultation — Required";
+
+  const kvkNote = confidence >= 0.80
+    ? "AI is confident, but you can verify with your local expert for free."
+    : "AI is not fully sure. Please consult your nearest KVK before applying any treatment.";
+
   useEffect(() => {
-    if (lowConfidence) {
-       const fetchKvks = async () => {
-         setLoadingKvks(true);
-         try {
-           const ctx = getFarmerContext();
-           const url = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-           const resp = await fetch(`${url}/api/nearest-kvk?lat=${ctx.lat}&long=${ctx.long}`);
-           if (resp.ok) {
-             const data = await resp.json();
-             setKvks(data.kvks || []);
-           }
-         } catch(e) {
-             console.error(e);
-         } finally {
-             setLoadingKvks(false);
-         }
-       };
-       fetchKvks();
-    }
-  }, [lowConfidence]);
+    const fetchKvks = async () => {
+      setLoadingKvks(true);
+      try {
+        const ctx = getFarmerContext();
+        const url = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const resp = await fetch(`${url}/api/nearest-kvk?lat=${ctx.lat}&long=${ctx.long}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          // Always show top 3
+          setKvks((data.kvks || []).slice(0, 3));
+        }
+      } catch(e) {
+        console.error(e);
+      } finally {
+        setLoadingKvks(false);
+      }
+    };
+    fetchKvks();
+  }, []);
 
   const handleTreatment = (type: "organic" | "chemical") => {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
@@ -147,9 +157,9 @@ export default function DiagnosisResultCard({
         </div>
       </div>
 
-      {/* ── Low Confidence Warning ──────────────────────────── */}
-      {lowConfidence && (
-        <div className="mx-4 mt-3 space-y-2">
+      {/* ── Expert Advice & nearest KVKs ────────────────────── */}
+      <div className="mx-4 mt-3 space-y-2">
+        {lowConfidence && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
@@ -162,34 +172,46 @@ export default function DiagnosisResultCard({
               </div>
             </div>
           </div>
-          
-          {/* Nearest KVKs */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-             <div className="text-sm font-bold text-blue-900 mb-2 flex items-center gap-1">
-                <MapPin className="w-4 h-4" /> Nearest KVK Centres
-             </div>
-             {loadingKvks ? (
-                <div className="text-xs font-medium text-blue-700 animate-pulse">Finding nearest centres...</div>
-             ) : kvks.length > 0 ? (
-                <div className="space-y-2">
-                   {kvks.map((k, i) => (
-                      <div key={i} className="flex justify-between items-center bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
-                         <div>
-                            <div className="text-xs font-bold text-gray-900">{k.name}</div>
-                            <div className="text-[10px] text-gray-500">{k.distance_km} km away {k.university ? `• ${k.university}` : ''}</div>
-                         </div>
-                         <a href={`tel:${k.phone}`} className="w-8 h-8 flex items-center justify-center bg-green-100 rounded-full text-green-700 active:scale-95 transition-transform">
-                            <PhoneCall className="w-3.5 h-3.5" />
-                         </a>
-                      </div>
-                   ))}
-                </div>
-             ) : (
-                <div className="text-xs text-blue-700">No centres found nearby. Call 1551 (Kisan Call Center).</div>
-             )}
-          </div>
+        )}
+        
+        {/* Nearest KVKs — ALWAYS SHOWN */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+           <div className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-1">
+              <MapPin className="w-4 h-4" /> {kvkTitle}
+           </div>
+           <p className="text-[10px] text-blue-700 mb-3 leading-tight opacity-80">
+              {kvkNote}
+           </p>
+
+           {loadingKvks ? (
+              <div className="text-xs font-medium text-blue-700 animate-pulse">Finding nearest centres...</div>
+           ) : kvks.length > 0 ? (
+              <div className="space-y-2">
+                 {kvks.map((k, i) => (
+                    <div key={i} className="bg-white border border-blue-100 rounded-2xl p-3 shadow-sm">
+                       <div className="flex justify-between items-start mb-2">
+                          <div>
+                             <div className="text-xs font-bold text-gray-900">{k.name}</div>
+                             <div className="text-[10px] text-gray-500">{k.distance_km} km away {k.university ? `• ${k.university}` : ''}</div>
+                          </div>
+                          <span className="bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                            Free consultation
+                          </span>
+                       </div>
+                       
+                       <a href={`tel:${k.phone}`}
+                          className="flex items-center justify-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2 text-xs font-semibold text-green-700 active:scale-[0.97] transition-transform">
+                          <PhoneCall className="w-3.5 h-3.5" />
+                          Call {k.name}
+                       </a>
+                    </div>
+                 ))}
+              </div>
+           ) : (
+              <div className="text-xs text-blue-700">No centres found nearby. Call 1551 (Kisan Call Center).</div>
+           )}
         </div>
-      )}
+      </div>
 
       {/* ── Explanation ─────────────────────────────────────── */}
       <div className="px-5 pt-4">

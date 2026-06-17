@@ -30,7 +30,7 @@ def get_model():
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set in .env")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.5-flash")
 
 def extract_json_from_gemini(raw_text: str) -> dict:
     """
@@ -104,6 +104,7 @@ async def diagnose(
     farmer_id: str = Form(default="anonymous"),
     farm_size: str = Form(default="Unknown"),
     farming_type: str = Form(default="Unknown"),
+    farm_id: str = Form(default=""),
 ):
     """
     Full crop diagnosis pipeline:
@@ -127,6 +128,25 @@ async def diagnose(
         # ── Step 1: Read and validate image ─────────────────────────
         image_bytes = await image.read()
         print(f"[diagnose] Received image: {len(image_bytes)} bytes, type: {image.content_type}")
+
+        # Check for base64 encoded image string
+        if image_bytes.startswith(b"data:image"):
+            try:
+                _, base64_data = image_bytes.split(b",", 1)
+                import base64
+                image_bytes = base64.b64decode(base64_data)
+                print(f"[diagnose] Decoded base64 image (header found): {len(image_bytes)} bytes")
+            except Exception as b64_err:
+                print(f"[diagnose] Base64 decoding with header failed: {b64_err}")
+        else:
+            try:
+                import base64
+                decoded = base64.b64decode(image_bytes, validate=True)
+                if len(decoded) > 0 and len(decoded) != len(image_bytes):
+                    image_bytes = decoded
+                    print(f"[diagnose] Decoded raw base64 image: {len(image_bytes)} bytes")
+            except Exception:
+                pass
 
         try:
             pil_image = Image.open(io.BytesIO(image_bytes))
@@ -183,6 +203,7 @@ STRICT RULES:
 - Identify the SPECIFIC disease name, not generic terms
 - Minimum confidence 0.55, maximum 1.0
 - Language for all descriptions: {lang_name}
+- CRITICAL: The farmer stated their farm crop is {crop_type}, but you MUST visually verify the crop in the photo. If the photo clearly shows a different crop (e.g. Wheat, Sugarcane, Cotton, etc.), identify the disease for the TRUE crop shown in the image, NOT the one in the context!
 
 Common Indian crop diseases to identify:
 Tomato: Early Blight, Late Blight, Leaf Curl, 
@@ -229,20 +250,134 @@ Respond with ONLY this JSON, nothing else:
   "low_confidence_note": null
 }}"""
 
-        # ── Step 5: Call Gemini with PIL image ──────────────────────
-        print("[diagnose] Calling Gemini vision API...")
-        model = get_model()
+        # ── Step 4.5: Check Roboflow primary scanner ─────────────────
+        roboflow_key = os.getenv("ROBOFLOW_API_KEY")
+        roboflow_model = os.getenv("ROBOFLOW_MODEL_ID")
+        roboflow_detected = False
+        roboflow_class = ""
+        roboflow_confidence = 0.0
 
-        response = model.generate_content(
-            [prompt, pil_image],
-            generation_config=genai.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=4096,
-                response_mime_type="application/json"
+        if roboflow_key and roboflow_model:
+            try:
+                import base64
+                import requests
+                # Encode image to base64 for Roboflow API
+                b64_image = base64.b64encode(image_bytes).decode("utf-8")
+                rf_url = f"https://detect.roboflow.com/{roboflow_model}"
+                
+                print(f"[diagnose] Calling Roboflow model {roboflow_model}...")
+                rf_response = requests.post(
+                    rf_url,
+                    params={"api_key": roboflow_key},
+                    data=b64_image,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=10
+                )
+                
+                if rf_response.status_code == 200:
+                    rf_res = rf_response.json()
+                    preds = rf_res.get("predictions", [])
+                    print(f"[diagnose] Roboflow predictions: {preds}")
+                    if preds:
+                        # Find the highest confidence prediction
+                        best_pred = max(preds, key=lambda x: x.get("confidence", 0.0))
+                        conf = best_pred.get("confidence", 0.0)
+                        if conf >= 0.40:  # confidence threshold
+                            roboflow_class = best_pred.get("class", "")
+                            parts = roboflow_class.split("___")
+                            rf_crop = parts[0].replace("_", " ").lower() if len(parts) > 1 else roboflow_class.lower()
+
+                            # Only use Roboflow if the detected crop matches the user's selected crop
+                            # Or if the user hasn't selected a specific crop ("unknown")
+                            if crop_type.lower() == "unknown" or crop_type.lower() == "other" or crop_type.lower() in rf_crop or rf_crop in crop_type.lower():
+                                roboflow_confidence = conf
+                                roboflow_detected = True
+                                print(f"[diagnose] Roboflow detected: {roboflow_class} with confidence {conf}")
+                            else:
+                                print(f"[diagnose] Roboflow rejected: User crop '{crop_type}' != RF crop '{rf_crop}'")
+                else:
+                    print(f"[diagnose] Roboflow error response: {rf_response.status_code} - {rf_response.text}")
+            except Exception as rf_err:
+                print(f"[diagnose] Roboflow execution error (falling back to Gemini): {rf_err}")
+
+        raw_text = ""
+
+        # If Roboflow detected a disease, call text-only Gemini to generate details
+        if roboflow_detected:
+            parts = roboflow_class.split("___")
+            detected_crop = parts[0].replace("_", " ").title() if len(parts) > 1 else crop_type
+            detected_disease = parts[1].replace("_", " ").title() if len(parts) > 1 else roboflow_class.replace("_", " ").title()
+            
+            print(f"[diagnose] Roboflow resolved crop: {detected_crop}, disease: {detected_disease}")
+            
+            text_prompt = f"""You are an expert Indian plant pathologist.
+A crop photo was scanned and Roboflow identified:
+Crop: {detected_crop}
+Detected Disease/Issue: {detected_disease}
+Detection Confidence: {roboflow_confidence:.2f}
+
+Farmer details:
+State: {state} | District: {district} | Soil: {soil_type}
+Farming type: {farming_type} | Farm size: {farm_size}
+Current weather: {weather_summary}
+Language for explanation/treatment/local name: {lang_name}
+
+Generate a structured plant pathology report for this disease.
+Respond ONLY with a single valid JSON object. Do not include markdown blocks or backticks.
+JSON structure:
+{{
+  "type": "disease",
+  "name": "{detected_disease}",
+  "name_local": "disease name in {lang_name}",
+  "confidence": {roboflow_confidence:.2f},
+  "explanation": "What is happening to this crop in 2-3 simple sentences that a farmer can understand",
+  "cause": "What organism or condition caused this",
+  "treatment_steps": [
+    "Step 1: Specific action with specific product name",
+    "Step 2: Specific dosage and application method",
+    "Step 3: Follow-up action and timing"
+  ],
+  "organic_option": {{
+    "description": "Specific organic treatment name",
+    "steps": [
+      "Step 1: Exact organic method with quantities",
+      "Step 2: Application frequency and timing"
+    ]
+  }},
+  "prevention": "One specific prevention tip for this disease",
+  "budget_items": [
+    {{"item": "Specific product name", "quantity": "250g", "price_inr": 90}},
+    {{"item": "Sprayer rental", "quantity": "1 day", "price_inr": 50}},
+    {{"item": "Labour", "quantity": "1 day", "price_inr": 200}}
+  ],
+  "total_cost_inr": 340,
+  "organic_total_cost_inr": 100,
+  "urgency": "immediate",
+  "low_confidence_note": null
+}}"""
+            print("[diagnose] Calling Gemini text model with Roboflow context...")
+            model = get_model()
+            response = model.generate_content(
+                text_prompt,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=4096,
+                )
             )
-        )
+            raw_text = response.text
+        else:
+            # ── Step 5: Call Gemini Vision with PIL image ──────────────────
+            print("[diagnose] Calling Gemini vision API (Fallback)...")
+            model = get_model()
 
-        raw_text = response.text
+            response = model.generate_content(
+                [prompt, pil_image],
+                generation_config=genai.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=4096,
+                )
+            )
+            raw_text = response.text
         
         print("=" * 50)
         print("GEMINI RAW RESPONSE:")
@@ -286,13 +421,14 @@ Respond with ONLY this JSON, nothing else:
                 long=long,
                 district=district,
                 crop_type=crop_type,
+                farm_id=farm_id,
             )
             if saved:
                 result["diagnosis_id"] = saved.get("id", "")
         except Exception as db_err:
             print(f"[diagnose] Supabase save failed (non-critical): {db_err}")
 
-        print(f"[diagnose] ✅ Diagnosis success: {result.get('name')} ({result.get('confidence')})")
+        print(f"[diagnose] [OK] Diagnosis success: {result.get('name')} ({result.get('confidence')})")
         return result
 
     except json.JSONDecodeError as je:
@@ -345,7 +481,7 @@ Respond with ONLY this JSON, nothing else:
         }
 
     except Exception as e:
-        print(f"[diagnose] ❌ Error: {str(e)}")
+        print(f"[diagnose] [ERROR] Error: {str(e)}")
         traceback.print_exc()
         return JSONResponse(
             status_code=500,

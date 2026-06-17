@@ -5,6 +5,7 @@ from services.supabase_service import get_mandi_cache, set_mandi_cache
 router = APIRouter()
 
 @router.get("/api/market")
+@router.get("/mandi/prices")
 async def market(
     request: Request,
     state: str = Query("Maharashtra"),

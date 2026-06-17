@@ -1,7 +1,8 @@
 import os
 import httpx
 
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
+def _get_sarvam_key() -> str:
+    return os.getenv("SARVAM_API_KEY", "").strip()
 
 SARVAM_STT_URL = "https://api.sarvam.ai/speech-to-text"
 SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
@@ -13,9 +14,17 @@ LANG_MAP = {
     "en": "en-IN"
 }
 
+SPEAKER_MAP = {
+    "hi-IN": "priya",
+    "mr-IN": "shruti",
+    "ta-IN": "kavitha",
+    "en-IN": "priya"
+}
+
 async def transcribe_audio(audio_bytes: bytes, filename: str, language: str) -> str:
     """Send audio to Sarvam Saaras STT API"""
-    if not SARVAM_API_KEY:
+    api_key = _get_sarvam_key()
+    if not api_key:
         print("SARVAM_API_KEY not configured. Mocking STT.")
         return "मुझे मदद चाहिए" # Mock response for testing
     
@@ -35,7 +44,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, language: str) -> 
     mime_type = mime_map.get(ext, "audio/wav")
     
     headers = {
-        "api-subscription-key": SARVAM_API_KEY
+        "api-subscription-key": api_key
     }
     
     files = {
@@ -62,7 +71,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, language: str) -> 
             # Response is typically {"transcript": "...."}
             json_resp = resp.json()
             transcript = json_resp.get("transcript", "")
-            print(f"[sarvam-stt] Transcript: {transcript[:100]}...")
+            print(f"[sarvam-stt] Transcript received ({len(transcript)} chars)")
             return transcript
             
     except httpx.HTTPStatusError as e:
@@ -77,21 +86,24 @@ import base64
 
 async def synthesize_speech(text: str, language: str) -> bytes | None:
     """Convert text to speech via Sarvam Bulbul v3 TTS API"""
-    if not SARVAM_API_KEY:
+    api_key = _get_sarvam_key()
+    if not api_key:
         print("SARVAM_API_KEY not configured. Skipping TTS.")
         return None
         
-    lang_code = LANG_MAP.get(language, "hi-IN")
+    lang_code = language if "-" in language else LANG_MAP.get(language, "hi-IN")
     
     headers = {
-        "api-subscription-key": SARVAM_API_KEY,
+        "api-subscription-key": api_key,
         "Content-Type": "application/json"
     }
+    
+    speaker = SPEAKER_MAP.get(lang_code, "anushka")
     
     payload = {
         "inputs": [text],
         "target_language_code": lang_code,
-        "speaker": "maitreyi",
+        "speaker": speaker,
         "model": "bulbul:v3"
     }
     

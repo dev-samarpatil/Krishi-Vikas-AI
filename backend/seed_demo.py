@@ -12,10 +12,10 @@ from services.supabase_service import get_supabase
 async def seed_data():
     client = get_supabase()
     if not client:
-        print("❌ Supabase client not initialized")
+        print("[ERROR] Supabase client not initialized")
         return
 
-    print("🌱 Seeding Demo Outbreak Data for Sentinel Map...")
+    print("[START] Seeding Demo Outbreak Data for Sentinel Map...")
     
     # Base Nashik coordinates
     base_lat = 19.99
@@ -27,7 +27,7 @@ async def seed_data():
     resp = client.table("diagnoses").select("*").eq("disease_name", disease).gte("created_at", forty_eight_hours_ago).execute()
     
     if len(resp.data or []) >= 6:
-        print(f"✅ Already have {len(resp.data)} recent records for {disease}. Skipping seed.")
+        print(f"[OK] Already have {len(resp.data)} recent records for {disease}. Skipping seed.")
         return
 
     # Generate 6 records around Nashik within a ~5km radius
@@ -57,9 +57,9 @@ async def seed_data():
     # Insert into Supabase
     try:
         res = client.table("diagnoses").insert(records).execute()
-        print(f"✅ Successfully seeded {len(res.data)} records for {disease} near Nashik.")
+        print(f"[OK] Successfully seeded {len(res.data)} records for {disease} near Nashik.")
     except Exception as e:
-        print(f"❌ Failed to seed data: {e}")
+        print(f"[ERROR] Failed to seed data: {e}")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())
