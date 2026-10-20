@@ -25,12 +25,13 @@ LANGUAGE_NAMES = {
 
 
 def get_model():
-    """Get a configured Gemini model instance."""
+    """Get a configured Gemini model instance with REST transport."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set in .env")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-2.5-flash")
+    genai.configure(api_key=api_key, transport="rest")
+    model_name = os.getenv("GEMINI_VISION_MODEL", os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash"))
+    return genai.GenerativeModel(model_name)
 
 def extract_json_from_gemini(raw_text: str) -> dict:
     """
@@ -171,9 +172,9 @@ async def diagnose(
             print(f"[diagnose] Geocode error (using fallback): {e}")
 
         # ── Step 3: Context lookups ─────────────────────────────────
-        soil_type = get_soil_type(district, request.app.state.soil)
+        soil_type = get_soil_type(district, getattr(request.app.state, "soil", []))
 
-        crop_info = get_crop_stage(crop_type, state, request.app.state.calendar)
+        crop_info = get_crop_stage(crop_type, state, getattr(request.app.state, "calendar", []))
         season = crop_info.get("season", "unknown")
         crop_stage = crop_info.get("stage", "growing")
 
@@ -184,50 +185,132 @@ async def diagnose(
         except Exception as e:
             print(f"[diagnose] Weather error (using fallback): {e}")
 
-        # ── Step 4: Build diagnosis prompt ──────────────────────────
+        # ── Step 4: Build diagnosis prompt with strict visual grounding ──
         lang_name = LANGUAGE_NAMES.get(language, "English")
 
-        prompt = f"""You are an expert Indian plant pathologist.
-Analyse this crop photo carefully.
+        prompt = f"""You are an expert Indian plant pathologist and agricultural diagnostician.
+Analyse this crop photo carefully with complete visual grounding.
 
-Context: {district}, {state} | Crop: {crop_type} | 
-Farm Size: {farm_size} | Farming Type: {farming_type}
+Context provided by farmer:
+Location: {district}, {state}
+Declared Crop: {crop_type}
+Farming Type: {farming_type} | Farm Size: {farm_size}
 Weather: {weather_summary} | Soil: {soil_type}
+Target Language: {lang_name}
 
-STRICT RULES:
+STRICT VISUAL INSPECTION INSTRUCTIONS:
+1. NON-CROP / INVALID IMAGE:
+   If the image DOES NOT show agricultural plant tissue, crop leaf, stem, or fruit (e.g. photo of a person, document, room, machinery, vehicle, abstract graphic, drawing, or blurred non-plant object):
+   You MUST respond with:
+   {{
+     "type": "invalid_image",
+     "name": "Non-crop Image Detected",
+     "name_local": "फसल की तस्वीर नहीं है",
+     "confidence": 0.0,
+     "severity": "none",
+     "urgency": "none",
+     "explanation": "The submitted photo does not appear to show a crop leaf, stem, or plant tissue. Please upload a clear photo of your crop.",
+     "cause": "Image does not depict agricultural foliage or plant disease symptoms.",
+     "treatment_steps": [],
+     "organic_option": {{"description": "N/A", "steps": []}},
+     "prevention": "Point your camera directly at the affected crop leaf in good daylight.",
+     "budget_items": [],
+     "total_cost_inr": 0,
+     "organic_total_cost_inr": 0,
+     "low_confidence_note": "Please upload a clear photograph of an agricultural crop leaf or plant."
+   }}
+
+2. HEALTHY CROP:
+   If the plant foliage appears healthy with no visible signs of pathogen infection, pest infestation, or nutrient deficiency:
+   Respond with:
+   {{
+     "type": "healthy",
+     "name": "Healthy Crop",
+     "name_local": "स्वस्थ फसल",
+     "confidence": 0.92,
+     "severity": "low",
+     "urgency": "none",
+     "explanation": "No symptoms of pests, fungal, bacterial, or viral disease are visible on this crop foliage. The plant tissue looks vigorous.",
+     "cause": "Normal plant growth under suitable conditions.",
+     "treatment_steps": [
+       "Maintain standard balanced irrigation and nutrition schedule",
+       "No chemical pesticide or fungicide application needed",
+       "Inspect foliage weekly for early pest detection"
+     ],
+     "organic_option": {{
+       "description": "Preventive biological maintenance",
+       "steps": [
+         "Spray fermented Jeevamrit or compost tea to support leaf microbiome",
+         "Install yellow sticky traps along field perimeter"
+       ]
+     }},
+     "prevention": "Continue regular crop rotation and maintain balanced NPK nutrition.",
+     "budget_items": [
+       {{"item": "Yellow sticky traps (preventive)", "quantity": "5 traps", "price_inr": 100}}
+     ],
+     "total_cost_inr": 100,
+     "organic_total_cost_inr": 50,
+     "low_confidence_note": null
+   }}
+
+3. INCONCLUSIVE / BLURRED:
+   If foliage is shown but symptoms are ambiguous, heavily out of focus, or inconclusive:
+   Respond with:
+   {{
+     "type": "inconclusive",
+     "name": "Inconclusive Symptoms",
+     "name_local": "अस्पष्ट लक्षण",
+     "confidence": 0.45,
+     "severity": "medium",
+     "urgency": "within_week",
+     "explanation": "Visible stress or leaf discoloration is present, but definitive disease classification is inconclusive from this angle/resolution.",
+     "cause": "Uncertain - could be early pathogen infection, nutrient deficiency, or environmental stress.",
+     "treatment_steps": [
+       "Do not apply toxic chemical sprays until disease identity is confirmed",
+       "Isolate or monitor affected leaves closely",
+       "Retake photo in daylight or consult your nearest KVK"
+     ],
+     "organic_option": {{
+       "description": "Mild neem-based foliar deterrent",
+       "steps": ["Apply 5ml neem oil per liter water as a safe broad deterrent"]
+     }},
+     "prevention": "Consult your local Krishi Vigyan Kendra (KVK) for visual verification.",
+     "budget_items": [
+       {{"item": "Neem oil spray (safe baseline)", "quantity": "250ml", "price_inr": 120}}
+     ],
+     "total_cost_inr": 120,
+     "organic_total_cost_inr": 120,
+     "low_confidence_note": "Symptoms are ambiguous. Please consult your local KVK or re-scan with better lighting."
+   }}
+
+4. DISEASE / PEST IDENTIFIED:
+   If a specific disease or pest issue IS clearly visible:
+   - Identify the TRUE crop shown in photo even if different from declared context.
+   - Provide the specific disease name in English and {lang_name}.
+   - Calibrate confidence between 0.55 and 0.98 based strictly on visual certainty.
+   - Set "severity": "low" | "medium" | "high".
+   - Set "urgency": "immediate" | "within_week" | "monitor".
+   - Provide concrete, actionable chemical and organic treatment steps, prevention tips, and realistic Indian INR budget estimates.
+
+STRICT JSON OUTPUT RULES:
 - Respond ONLY with a single valid JSON object
+- Do NOT include any markdown code blocks or backticks (no ```json or ```)
 - Do NOT include any text before or after the JSON
-- Do NOT use markdown code blocks or backticks
-- Do NOT add comments inside the JSON
-- All string values must use double quotes
-- Identify the SPECIFIC disease name, not generic terms
-- Minimum confidence 0.55, maximum 1.0
-- Language for all descriptions: {lang_name}
-- CRITICAL: The farmer stated their farm crop is {crop_type}, but you MUST visually verify the crop in the photo. If the photo clearly shows a different crop (e.g. Wheat, Sugarcane, Cotton, etc.), identify the disease for the TRUE crop shown in the image, NOT the one in the context!
+- All keys and string values must use double quotes
+- Language for explanations and local names: {lang_name}
 
-Common Indian crop diseases to identify:
-Tomato: Early Blight, Late Blight, Leaf Curl, 
-        Septoria Leaf Spot, Fusarium Wilt
-Cotton: Bollworm, Pink Bollworm, Aphids, Leaf Curl Virus
-Wheat: Rust (Yellow/Brown/Black), Smut, Powdery Mildew
-Onion: Purple Blotch, Downy Mildew, Thrips
-Rice: Blast, Brown Plant Hopper, Sheath Blight
-Soybean: Yellow Mosaic Virus, Rust, Pod Borer
-General: Nitrogen deficiency (uniform yellowing),
-         Iron deficiency (interveinal yellowing),
-         Spider Mites (stippling + webbing),
-         Aphids (curling + sticky residue)
-
-Respond with ONLY this JSON, nothing else:
+JSON structure:
 {{
   "type": "disease",
-  "name": "SPECIFIC disease name in English",
+  "name": "Specific disease name in English",
   "name_local": "disease name in {lang_name}",
   "confidence": 0.85,
-  "explanation": "What is happening to this crop in 2-3 simple sentences that a farmer can understand",
-  "cause": "What organism or condition caused this",
+  "severity": "medium",
+  "urgency": "immediate",
+  "explanation": "What is happening to this crop in 2-3 simple sentences",
+  "cause": "What pathogen or condition caused this",
   "treatment_steps": [
-    "Step 1: Specific action with specific product name",
+    "Step 1: Specific action with product name",
     "Step 2: Specific dosage and application method",
     "Step 3: Follow-up action and timing"
   ],
@@ -238,15 +321,13 @@ Respond with ONLY this JSON, nothing else:
       "Step 2: Application frequency and timing"
     ]
   }},
-  "prevention": "One specific prevention tip for this disease",
+  "prevention": "One specific prevention tip",
   "budget_items": [
-    {{"item": "Specific product name", "quantity": "250g", "price_inr": 90}},
-    {{"item": "Sprayer rental", "quantity": "1 day", "price_inr": 50}},
+    {{"item": "Product name", "quantity": "250g", "price_inr": 90}},
     {{"item": "Labour", "quantity": "1 day", "price_inr": 200}}
   ],
-  "total_cost_inr": 340,
+  "total_cost_inr": 290,
   "organic_total_cost_inr": 100,
-  "urgency": "immediate",
   "low_confidence_note": null
 }}"""
 
@@ -271,7 +352,7 @@ Respond with ONLY this JSON, nothing else:
                     params={"api_key": roboflow_key},
                     data=b64_image,
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    timeout=10
+                    timeout=4
                 )
                 
                 if rf_response.status_code == 200:
@@ -411,22 +492,24 @@ JSON structure:
             "weather": weather_summary,
         }
 
-        # ── Step 9: Save to Supabase (non-blocking) ─────────────────
-        try:
-            saved = await save_diagnosis(
-                farmer_id=farmer_id,
-                disease_name=result.get("name", "Unknown"),
-                confidence=result.get("confidence", 0.0),
-                lat=lat,
-                long=long,
-                district=district,
-                crop_type=crop_type,
-                farm_id=farm_id,
-            )
-            if saved:
-                result["diagnosis_id"] = saved.get("id", "")
-        except Exception as db_err:
-            print(f"[diagnose] Supabase save failed (non-critical): {db_err}")
+        # ── Step 9: Save to Supabase (only for real plant diagnoses) ──
+        # Do not persist invalid/non-crop images or rejected scans as diseases in farm history
+        if result.get("type") in ("disease", "healthy") and result.get("confidence", 0.0) >= 0.40:
+            try:
+                saved = await save_diagnosis(
+                    farmer_id=farmer_id,
+                    disease_name=result.get("name", "Unknown"),
+                    confidence=result.get("confidence", 0.0),
+                    lat=lat,
+                    long=long,
+                    district=district,
+                    crop_type=crop_type,
+                    farm_id=farm_id,
+                )
+                if saved:
+                    result["diagnosis_id"] = saved.get("id", "")
+            except Exception as db_err:
+                print(f"[diagnose] Supabase save failed (non-critical): {db_err}")
 
         print(f"[diagnose] [OK] Diagnosis success: {result.get('name')} ({result.get('confidence')})")
         return result
@@ -434,51 +517,17 @@ JSON structure:
     except json.JSONDecodeError as je:
         print(f"[diagnose] JSON parse error: {je}")
         print(f"[diagnose] Raw text was: {raw_text}")
-        # Return a fallback diagnosis so the user still gets something useful
-        return {
-            "type": "disease",
-            "name": "Leaf Disease Detected",
-            "name_local": "पत्ती रोग",
-            "confidence": 0.55,
-            "explanation": (
-                "Disease symptoms are visible in the photo. "
-                "The AI had trouble formatting the response, but damage is evident. "
-                "Please consult your nearest KVK for precise identification."
-            ),
-            "cause": "Likely fungal or bacterial infection",
-            "treatment_steps": [
-                "Step 1: Remove and destroy affected leaves",
-                "Step 2: Apply broad-spectrum fungicide (Mancozeb / Copper Oxychloride)",
-                "Step 3: Improve air circulation around plant",
-            ],
-            "organic_option": {
-                "description": "Neem oil spray",
-                "steps": [
-                    "Mix 5ml neem oil in 1L water",
-                    "Spray on affected parts every 7 days",
-                ],
-            },
-            "prevention": "Avoid overhead irrigation and maintain proper spacing",
-            "budget_items": [
-                {"item": "Fungicide", "quantity": "250g", "price_inr": 120},
-                {"item": "Labour", "quantity": "1 day", "price_inr": 200},
-            ],
-            "total_cost_inr": 320,
-            "organic_total_cost_inr": 80,
-            "urgency": "within_week",
-            "low_confidence_note": (
-                "AI gave an imprecise response. "
-                "Visiting nearest KVK is recommended for confirmation."
-            ),
-            "_context": {
-                "district": district,
-                "state": state,
-                "soil_type": soil_type,
-                "season": season,
-                "crop_stage": crop_stage,
-                "weather": weather_summary,
-            },
-        }
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "status": "analysis_unavailable",
+                "error": {
+                    "code": "MODEL_RESPONSE_INVALID",
+                    "message": "AI analysis produced an unparseable response. Please take a clearer photo and try again."
+                }
+            }
+        )
 
     except Exception as e:
         print(f"[diagnose] [ERROR] Error: {str(e)}")
@@ -486,9 +535,13 @@ JSON structure:
         return JSONResponse(
             status_code=500,
             content={
-                "error": str(e),
-                "details": "Check server logs or Gemini API status",
-            },
+                "success": False,
+                "status": "server_error",
+                "error": {
+                    "code": "DIAGNOSIS_FAILED",
+                    "message": "Crop diagnosis is temporarily unavailable. Please try again shortly."
+                }
+            }
         )
 
 
