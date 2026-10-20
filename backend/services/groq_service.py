@@ -1,11 +1,20 @@
 import os
+from dotenv import load_dotenv
 from groq import AsyncGroq
 import json
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-# Create standard async client
-client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+_groq_client: AsyncGroq | None = None
+
+def get_groq_client() -> AsyncGroq | None:
+    global _groq_client
+    if _groq_client is not None:
+        return _groq_client
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if key:
+        _groq_client = AsyncGroq(api_key=key)
+    return _groq_client
 
 CHAT_SYSTEM_PROMPT = """
 You are Krishi Vikas AI, an expert and practical farming assistant for Indian agriculture.
@@ -60,14 +69,7 @@ async def chat_with_farmer(
 ) -> dict:
     """Send context-aware message to Groq Llama-3 to get response for farmer."""
     
-    if not client:
-        print("GROQ_API_KEY not configured. Returning fallback response.")
-        fallback_msg = "I am having trouble connecting to my AI brain right now. Please try again later."
-        return {
-            "reply": fallback_msg,
-            "response": fallback_msg,
-            "intent_type": "general"
-        }
+    client = get_groq_client()
 
     LANGUAGE_NAMES = {
         "en": "English",
@@ -91,55 +93,57 @@ async def chat_with_farmer(
         market_context=market_context
     )
     
-    try:
-        response = await client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": sys_prompt
-                },
-                {
-                    "role": "user",
-                    "content": message
+    # Try Groq with verified active models
+    if client:
+        models_to_try = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+        for model_name in models_to_try:
+            try:
+                response = await client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": message}
+                    ],
+                    model=model_name,
+                    temperature=0.4,
+                    max_tokens=450,
+                )
+                reply_text = response.choices[0].message.content.strip() if response.choices else "Sorry, I couldn't process that."
+                return {
+                    "reply": reply_text,
+                    "response": reply_text,
+                    "intent_type": "general",
+                    "provider": f"groq/{model_name}",
+                    "success": True,
                 }
-            ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.4,
-            max_tokens=450,
-        )
-        
-        reply_text = response.choices[0].message.content.strip() if response.choices else "Sorry, I couldn't process that."
-        
-        return {
-            "reply": reply_text,
-            "response": reply_text,
-            "intent_type": "general" # Can be evolved with a classifier if needed
-        }
-        
-    except Exception as e:
-        print(f"Groq API Error with primary model: {e}")
-        # Fallback to a smaller, more stable model
-        try:
-            response = await client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": message}
-                ],
-                model="llama-3.1-8b-instant",
-                temperature=0.4,
-                max_tokens=450,
-            )
-            reply_text = response.choices[0].message.content.strip() if response.choices else "Sorry, I couldn't process that."
+            except Exception as groq_err:
+                print(f"[GroqService] Error with model {model_name}: {groq_err}")
+
+    # Fallback to Gemini if Groq is unavailable
+    try:
+        import asyncio
+        import google.generativeai as genai
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            genai.configure(api_key=gemini_key, transport="rest")
+            gmodel = genai.GenerativeModel("gemini-2.5-flash")
+            full_prompt = f"{sys_prompt}\n\nFarmer: {message}\nAssistant:"
+            gemini_resp = await asyncio.to_thread(gmodel.generate_content, full_prompt)
+            reply_text = gemini_resp.text.strip()
             return {
                 "reply": reply_text,
                 "response": reply_text,
-                "intent_type": "general"
+                "intent_type": "general",
+                "provider": "gemini/gemini-2.5-flash",
+                "success": True,
             }
-        except Exception as e2:
-            print(f"Groq API Error with fallback model: {e2}")
-            error_msg = "Service temporarily unavailable due to a network glitch. Try again soon."
-            return {
-                "reply": error_msg,
-                "response": error_msg,
-                "intent_type": "error"
-            }
+    except Exception as gemini_err:
+        print(f"[GroqService] Gemini fallback error: {gemini_err}")
+
+    error_msg = "The AI farming assistant is temporarily unavailable. Please try again soon."
+    return {
+        "reply": error_msg,
+        "response": error_msg,
+        "intent_type": "error",
+        "success": False,
+    }
+

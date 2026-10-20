@@ -35,17 +35,16 @@ class AlertRequest(BaseModel):
 
 def _get_clusters():
     """Fetch diagnoses from last 48 hours and cluster them."""
+    records = []
     client = get_supabase()
-    if not client:
-        return []
-
-    # Get diagnoses from last 48 hours
-    forty_eight_hours_ago = (datetime.utcnow() - timedelta(hours=48)).isoformat()
-    try:
-        response = client.table("diagnoses").select("*").gte("created_at", forty_eight_hours_ago).execute()
-        records = response.data or []
-    except Exception:
-        records = []
+    if client:
+        # Get diagnoses from last 48 hours
+        forty_eight_hours_ago = (datetime.utcnow() - timedelta(hours=48)).isoformat()
+        try:
+            response = client.table("diagnoses").select("*").gte("created_at", forty_eight_hours_ago).execute()
+            records = response.data or []
+        except Exception:
+            records = []
 
     # Inject mock records for Nashik demo if DB is empty or unreachable
     if len(records) == 0:

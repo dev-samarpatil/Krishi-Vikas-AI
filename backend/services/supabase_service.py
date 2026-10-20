@@ -1,8 +1,8 @@
 import os
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 _client: Client | None = None
 
@@ -12,11 +12,20 @@ def get_supabase() -> Client | None:
     global _client
     if _client is not None:
         return _client
-    if not SUPABASE_URL or not SUPABASE_KEY:
+
+    url = os.getenv("SUPABASE_URL", "").strip()
+    key = (
+        os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+
+    if not url or not key:
         print("[WARNING] Supabase credentials not set — database features disabled")
         return None
     try:
-        _client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _client = create_client(url, key)
         return _client
     except Exception as e:
         print(f"Supabase init error: {e}")
