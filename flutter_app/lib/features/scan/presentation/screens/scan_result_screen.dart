@@ -155,6 +155,31 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
             _buildHeroSection(scanState, result, cropName, l10n),
             const SizedBox(height: AppTheme.spacingMd),
 
+            if (result.lowConfidenceNote != null && result.lowConfidenceNote!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMd, vertical: 4),
+                child: Container(
+                  padding: const EdgeInsets.all(AppTheme.spacingMd),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                    border: Border.all(color: Colors.amber.shade400),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.amber.shade900),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          result.lowConfidenceNote!,
+                          style: TextStyle(color: Colors.amber.shade900, fontSize: 13, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMd),
               child: Column(
@@ -198,6 +223,25 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
   }
 
   Widget _buildHeroSection(ScanState scanState, ScanResponseModel result, String cropName, AppLocalizations l10n) {
+    Color badgeColor = AppTheme.errorRed;
+    String badgeText = 'HIGH SEVERITY';
+    if (result.isInvalidImage) {
+      badgeColor = Colors.grey.shade800;
+      badgeText = 'NON-CROP IMAGE';
+    } else if (result.isHealthy) {
+      badgeColor = AppTheme.successGreen;
+      badgeText = 'HEALTHY CROP';
+    } else if (result.isInconclusive) {
+      badgeColor = Colors.orange.shade800;
+      badgeText = 'INCONCLUSIVE';
+    } else if (result.severity.toLowerCase() == 'low') {
+      badgeColor = AppTheme.primaryGreen;
+      badgeText = 'LOW SEVERITY';
+    } else if (result.severity.toLowerCase() == 'medium') {
+      badgeColor = Colors.orange.shade800;
+      badgeText = 'MODERATE RISK';
+    }
+
     return Stack(
       children: [
         // Background image
@@ -245,26 +289,28 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppTheme.errorRed,
-                      borderRadius: BorderRadius.circular(AppTheme.radiusXLarge),
-                    ),
-                    child: const Text(
-                      'HIGH SEVERITY',
-                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: badgeColor,
                       borderRadius: BorderRadius.circular(AppTheme.radiusXLarge),
                     ),
                     child: Text(
-                      '${(result.confidence * 100).round()}% Match',
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      badgeText,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                     ),
                   ),
+                  if (result.confidence > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusXLarge),
+                      ),
+                      child: Text(
+                        '${(result.confidence * 100).round()}% Confidence',
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 6),
@@ -471,15 +517,14 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(kvk.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppTheme.textPrimary)),
-                        if (kvk.distance != null)
-                          Text('${kvk.distance!.toStringAsFixed(1)} km away', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                        Text('${kvk.distance.toStringAsFixed(1)} km away', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: () async {
-                      final query = Uri.encodeComponent('${kvk.name} ${kvk.address ?? ""}');
+                      final query = Uri.encodeComponent('${kvk.name} ${kvk.address}');
                       final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
                       if (await canLaunchUrl(url)) {
                         await launchUrl(url);

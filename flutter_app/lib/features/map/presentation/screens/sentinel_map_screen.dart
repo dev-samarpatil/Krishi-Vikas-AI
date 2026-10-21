@@ -39,6 +39,7 @@ class _SentinelMapScreenState extends ConsumerState<SentinelMapScreen> {
   Outbreak? _selectedOutbreak;
   List<Outbreak> _outbreaks = [];
   bool _outbreaksGenerated = false;
+  bool _tileLoadError = false;
 
   // Weather toggle options
   final List<Map<String, String>> _weatherLayers = [
@@ -73,9 +74,11 @@ class _SentinelMapScreenState extends ConsumerState<SentinelMapScreen> {
     ];
 
     _outbreaks = diseaseTemplates.map((tmpl) {
+      final double rawLat = center.latitude + (tmpl['latOffset'] as double);
+      final double rawLng = center.longitude + (tmpl['lngOffset'] as double);
       final loc = LatLng(
-        center.latitude + (tmpl['latOffset'] as double),
-        center.longitude + (tmpl['lngOffset'] as double),
+        rawLat.clamp(-90.0, 90.0),
+        rawLng.clamp(-180.0, 180.0),
       );
       final dist = _calculateDistance(center, loc);
       return Outbreak(
@@ -114,10 +117,11 @@ class _SentinelMapScreenState extends ConsumerState<SentinelMapScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final selectedFarm = ref.watch(selectedFarmProvider);
-    final LatLng farmerLocation = LatLng(
-      selectedFarm?.latWithFallback ?? 19.3919,
-      selectedFarm?.lngWithFallback ?? 72.8397,
-    );
+    final rawLat = selectedFarm?.latWithFallback ?? 19.3919;
+    final rawLng = selectedFarm?.lngWithFallback ?? 72.8397;
+    final safeLat = (rawLat >= -90.0 && rawLat <= 90.0) ? rawLat : 19.3919;
+    final safeLng = (rawLng >= -180.0 && rawLng <= 180.0) ? rawLng : 72.8397;
+    final LatLng farmerLocation = LatLng(safeLat, safeLng);
 
     // Generate outbreaks around farmer's active coordinates
     _generateDemoOutbreaks(farmerLocation);
@@ -136,11 +140,21 @@ class _SentinelMapScreenState extends ConsumerState<SentinelMapScreen> {
               onTap: (_, __) => setState(() => _selectedOutbreak = null),
             ),
             children: [
-              // Light-themed map tiles (CartoDB Voyager)
+              // Base Map Tiles: Standard OpenStreetMap raster tiles
               TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'ai.krishivikas.app',
+                maxZoom: 19,
+                errorTileCallback: (tile, error, stackTrace) {
+                  if (!_tileLoadError && mounted) {
+                    setState(() => _tileLoadError = true);
+                  }
+                },
+              ),
+
+              // OpenStreetMap Attribution
+              const SimpleAttributionWidget(
+                source: Text('© OpenStreetMap contributors'),
               ),
 
               // Climate Risk Overlays
@@ -347,6 +361,43 @@ class _SentinelMapScreenState extends ConsumerState<SentinelMapScreen> {
               ),
             ),
           ),
+
+          // ── Tile Load Error Banner ────────────────────────
+          if (_tileLoadError)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 65,
+              left: 16,
+              right: 16,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xFF2F312F).withOpacity(0.92),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_off_outlined, color: Color(0xFFFCAB28), size: 18),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Map imagery is temporarily unavailable.',
+                          style: TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() => _tileLoadError = false);
+                        },
+                        child: const Text(
+                          'Retry',
+                          style: TextStyle(color: Color(0xFFACF4A4), fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // ── Bottom Overlays ───────────────────────────────
           if (_showDiseaseOutbreak && _selectedOutbreak != null)

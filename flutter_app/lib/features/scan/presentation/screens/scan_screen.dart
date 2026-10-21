@@ -51,11 +51,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     try {
       final dio = Dio(BaseOptions(headers: {'Bypass-Tunnel-Reminder': 'true'}));
       final formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(
+        'image': await MultipartFile.fromFile(
           _selectedImage!.path,
           filename: _selectedImage!.name,
         ),
-        'farm_context': 'Tomato', // TODO: Fetch from selected farm
+        'crop_type': 'Tomato',
       });
 
       final response = await dio.post(
@@ -74,11 +74,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Disease: ${result['disease']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text('Disease: ${result['name'] ?? result['disease'] ?? 'Unknown'}', style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                Text('Confidence: ${(result['confidence'] * 100).toStringAsFixed(1)}%'),
+                Text('Confidence: ${(((result['confidence'] ?? 0.0) as num) * 100).toStringAsFixed(1)}%'),
                 const SizedBox(height: 8),
-                Text('Recommendation: ${result['recommendation']}'),
+                Text('Explanation: ${result['explanation'] ?? ''}'),
               ],
             ),
             actions: [

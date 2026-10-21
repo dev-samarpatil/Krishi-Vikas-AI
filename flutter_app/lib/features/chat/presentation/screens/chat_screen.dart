@@ -81,7 +81,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with SingleTickerProvid
   void _saveMessages() {
     try {
       final box = Hive.box(AppConstants.cacheBox);
-      box.put('chat_messages', _messages);
+      final validMessages = _messages.where((m) => m['role'] != 'error').toList();
+      box.put('chat_messages', validMessages);
     } catch (e) {
       debugPrint("Error saving messages: $e");
     }
@@ -99,84 +100,124 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with SingleTickerProvid
     });
   }
 
- Future<void> _sendMessage(String text) async {
-  if (text.trim().isEmpty) return;
-
-  setState(() {
-    _messages.add({
-      'role': 'user',
-      'content': text,
-    });
-
-    _messageController.clear();
-    _showSendButton = false;
-    _isTyping = true;
-  });
-
-  _saveMessages();
-  _scrollToBottom();
-
-  try {
-    final locale = ref.read(localeProvider);
-
-    final dio = Dio(BaseOptions(headers: {'Bypass-Tunnel-Reminder': 'true'}));
-
-    final response = await dio.post(
-      '${AppConstants.baseUrl}/api/chat',
-      data: {
-        'message': text,
-        'language': locale.languageCode,
-      },
-    );
-
-    final reply =
-        (response.data['response'] ?? response.data['reply']) as String? ?? 'No response';
+  Future<void> _sendMessage(String text) async {
+    final cleanText = text.trim();
+    if (cleanText.isEmpty || _isTyping) return;
 
     setState(() {
       _messages.add({
-        'role': 'assistant',
-        'content': reply,
+        'role': 'user',
+        'content': cleanText,
       });
 
-      _isTyping = false;
+      _messageController.clear();
+      _showSendButton = false;
+      _isTyping = true;
     });
-  } catch (e) {
-    final fallback = _getFallbackResponse(text);
 
-    setState(() {
-      _messages.add({
-        'role': 'assistant',
-        'content': fallback,
+    _saveMessages();
+    _scrollToBottom();
+
+    try {
+      final locale = ref.read(localeProvider);
+      final selectedFarm = ref.read(selectedFarmProvider);
+
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
+          headers: {'Bypass-Tunnel-Reminder': 'true'},
+        ),
+      );
+
+      final response = await dio.post(
+        '${AppConstants.baseUrl}/api/chat',
+        data: {
+          'message': cleanText,
+          'language': locale.languageCode,
+          'lat': selectedFarm?.latWithFallback ?? 19.997,
+          'long': selectedFarm?.lngWithFallback ?? 73.789,
+          'crop': selectedFarm?.crop,
+          'district': selectedFarm?.district,
+        },
+      );
+
+      if (!mounted) return;
+
+      final data = response.data;
+      final isSuccess = data is Map && data['success'] != false && data['intent_type'] != 'error';
+
+      if (isSuccess) {
+        final reply = (data['response'] ?? data['reply']) as String? ?? 'No response';
+
+        setState(() {
+          _messages.add({
+            'role': 'assistant',
+            'content': reply,
+          });
+          _isTyping = false;
+        });
+      } else {
+        // Backend returned a soft error
+        final errorMsg = (data is Map && data['error'] is Map && data['error']['message'] != null)
+            ? data['error']['message'].toString()
+            : (data is Map && data['reply'] != null ? data['reply'].toString() : 'Service temporarily unavailable.');
+
+        setState(() {
+          _messages.add({
+            'role': 'error',
+            'content': cleanText,
+            'errorMessage': errorMsg,
+          });
+          _isTyping = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      debugPrint('Chat error: $e');
+      final errorMsg = _getFarmerFriendlyErrorMessage(e);
+
+      setState(() {
+        _messages.add({
+          'role': 'error',
+          'content': cleanText,
+          'errorMessage': errorMsg,
+        });
+        _isTyping = false;
       });
+    }
 
-      _isTyping = false;
-    });
-
-    debugPrint('Chat error: $e');
+    _saveMessages();
+    _scrollToBottom();
   }
 
-  _saveMessages();
-  _scrollToBottom();
-}
-
-  // Generate mock response when Groq call fails
-  String _getFallbackResponse(String userMessage) {
-    final msg = userMessage.toLowerCase();
-    if (msg.contains('disease') || msg.contains('pest')) {
-      return 'Here are detailed steps to manage the disease/pest: ... (provide actionable advice with product names, dosages, timing).';
+  String _getFarmerFriendlyErrorMessage(dynamic error) {
+    if (error is DioException) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout) {
+        return 'Connection timed out. The assistant took too long to respond. Tap Retry to try again.';
+      }
+      if (error.type == DioExceptionType.connectionError) {
+        return 'Unable to connect to the farming assistant. Please check your internet connection.';
+      }
+      if (error.response?.statusCode == 503) {
+        return 'The AI assistant service is temporarily busy. Tap Retry to try again.';
+      }
+      if (error.response?.statusCode == 429) {
+        return 'Too many messages sent. Please wait a moment and try again.';
+      }
     }
-    if (msg.contains('price') || msg.contains('mandi')) {
-      return 'Current market prices for major crops are: ... (provide price advice).';
-    }
-    if (msg.contains('weather') || msg.contains('rain')) {
-      return 'Weather forecast for your region: ... (provide weather advice).';
-    }
-    return 'I understand your question. Please ensure the backend is running for detailed AI responses.';
+    return 'Unable to get advice right now. Please check your internet connection and try again.';
   }
 
   Future<void> _retryMessage(int index, String text) async {
+    if (_isTyping) return;
     setState(() {
-      _messages.removeAt(index);
+      if (index >= 0 && index < _messages.length) {
+        _messages.removeAt(index);
+      }
     });
     await _sendMessage(text);
   }
@@ -290,7 +331,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with SingleTickerProvid
                       }
                       final message = _messages[index];
                       if (message['role'] == 'error') {
-                        return _buildErrorBubble(index, message['content'] ?? '');
+                        return _buildErrorBubble(index, message['content'] ?? '', message['errorMessage']);
                       }
                       return _buildMessageBubble(message);
                     },
@@ -529,11 +570,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildErrorBubble(int index, String originalText) {
+  Widget _buildErrorBubble(int index, String originalText, [String? customError]) {
     return Align(
       alignment: Alignment.center,
       child: Container(
-        margin: const EdgeInsets.only(bottom: AppTheme.spacingSm),
+        margin: const EdgeInsets.symmetric(vertical: AppTheme.spacingSm),
         padding: const EdgeInsets.all(AppTheme.spacingMd),
         decoration: BoxDecoration(
           color: AppTheme.errorRed.withOpacity(0.08),
@@ -542,9 +583,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with SingleTickerProvid
         ),
         child: Column(
           children: [
-            Text(
-              AppLocalizations.of(context)!.somethingWentWrong,
-              style: const TextStyle(color: AppTheme.errorRed, fontWeight: FontWeight.w500),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, color: AppTheme.errorRed, size: 18),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    customError ?? AppLocalizations.of(context)!.somethingWentWrong,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppTheme.errorRed, fontWeight: FontWeight.w500, fontSize: 13),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: AppTheme.spacingSm),
             ElevatedButton.icon(
