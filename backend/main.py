@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import glob
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile
@@ -9,10 +10,17 @@ import google.generativeai as genai
 from PIL import Image
 import io
 
-# Load environment variables
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+# Ensure backend directory is in sys.path so that internal modules (services, routes, utils)
+# resolve correctly regardless of whether the application is launched from the workspace root
+# (e.g. uvicorn backend.main:app) or from the backend directory (e.g. uvicorn main:app).
+backend_dir = os.path.abspath(os.path.dirname(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+# Load environment variables
+load_dotenv(os.path.join(backend_dir, "..", ".env"))
+
+DATA_DIR = os.path.join(backend_dir, "..", "data")
 
 
 @asynccontextmanager
@@ -108,6 +116,7 @@ async def root():
     }
 
 
+@app.get("/health")
 @app.get("/api/health")
 async def health_check():
     return {
@@ -125,7 +134,8 @@ async def health_check():
 async def test_gemini():
     try:
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        target_model = os.getenv("GEMINI_VISION_MODEL") or "gemini-flash-lite-latest"
+        model = genai.GenerativeModel(target_model)
         response = model.generate_content("Say hello in one word")
         return {"status": "ok", "response": response.text}
     except Exception as e:
@@ -137,7 +147,8 @@ async def test_gemini():
 async def test_vision(image: UploadFile = File(...)):
     try:
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        target_model = os.getenv("GEMINI_VISION_MODEL") or "gemini-flash-lite-latest"
+        model = genai.GenerativeModel(target_model)
 
         # Read image bytes
         image_bytes = await image.read()

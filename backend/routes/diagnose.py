@@ -1,11 +1,25 @@
 from fastapi import APIRouter, File, UploadFile, Form, Request, Query
 from fastapi.responses import JSONResponse
+from typing import Optional, List, Dict, Any
 import google.generativeai as genai
+from google.api_core.exceptions import (
+    GoogleAPICallError,
+    TooManyRequests,
+    ResourceExhausted,
+    PermissionDenied,
+    Unauthenticated,
+    ServiceUnavailable,
+    DeadlineExceeded,
+    NotFound,
+    InvalidArgument,
+    BadRequest,
+)
 from PIL import Image
 import io
 import json
 import os
 import re
+import sys
 import traceback
 
 from services.supabase_service import save_diagnosis
@@ -16,6 +30,19 @@ from utils.haversine import get_nearest_kvks
 
 router = APIRouter()
 
+
+def safe_log(msg: Any):
+    """Safely print log messages on Windows console regardless of terminal charmap encoding."""
+    text = str(msg)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        try:
+            encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+            print(text.encode(encoding, errors="backslashreplace").decode(encoding))
+        except Exception:
+            pass
+
 LANGUAGE_NAMES = {
     "en": "English",
     "hi": "Hindi",
@@ -23,15 +50,72 @@ LANGUAGE_NAMES = {
     "ta": "Tamil",
 }
 
+DEFAULT_VISION_MODEL = "gemini-flash-lite-latest"
 
-def get_model():
+
+def get_model(model_name: Optional[str] = None):
     """Get a configured Gemini model instance with REST transport."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set in .env")
     genai.configure(api_key=api_key, transport="rest")
-    model_name = os.getenv("GEMINI_VISION_MODEL", os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash"))
-    return genai.GenerativeModel(model_name)
+    target_model = model_name or os.getenv("GEMINI_VISION_MODEL") or os.getenv("GEMINI_CHAT_MODEL") or DEFAULT_VISION_MODEL
+    return genai.GenerativeModel(target_model)
+
+
+def generate_content_with_fallback(contents, generation_config=None) -> str:
+    """
+    Attempt content generation using primary model and fallback candidate models.
+    Gracefully handles per-model rate limits (429) and deprecations.
+    """
+    primary_model = os.getenv("GEMINI_VISION_MODEL") or DEFAULT_VISION_MODEL
+    candidate_models = [
+        primary_model,
+        "gemini-flash-lite-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-pro-latest",
+    ]
+    
+    seen = set()
+    models_to_try = []
+    for m in candidate_models:
+        if m and m not in seen:
+            seen.add(m)
+            models_to_try.append(m)
+
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            print(f"[diagnose] Calling Gemini model: {model_name}...")
+            model = get_model(model_name=model_name)
+            response = model.generate_content(
+                contents,
+                generation_config=generation_config
+            )
+            if response and response.text:
+                print(f"[diagnose] Gemini model '{model_name}' responded successfully.")
+                return response.text
+        except (TooManyRequests, ResourceExhausted) as quota_err:
+            print(f"[diagnose] Gemini model '{model_name}' quota exceeded (429): {quota_err}")
+            last_error = quota_err
+            continue
+        except (NotFound, GoogleAPICallError) as api_err:
+            print(f"[diagnose] Gemini model '{model_name}' API error: {api_err}")
+            last_error = api_err
+            continue
+        except Exception as err:
+            print(f"[diagnose] Gemini model '{model_name}' failed with {type(err).__name__}: {err}")
+            last_error = err
+            if "GEMINI_API_KEY" in str(err):
+                raise
+            continue
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No response returned from Gemini models")
+
 
 def extract_json_from_gemini(raw_text: str) -> dict:
     """
@@ -119,8 +203,15 @@ async def diagnose(
     # ── Step 0: Check API Key ──────────────────────────────────────
     if not os.getenv("GEMINI_API_KEY"):
         return JSONResponse(
-            status_code=500, 
-            content={"error": "Missing API Key for Gemini", "details": "GEMINI_API_KEY is not set in environment variables"}
+            status_code=503,
+            content={
+                "success": False,
+                "status": "service_unavailable",
+                "error": {
+                    "code": "MISSING_API_KEY",
+                    "message": "Crop analysis service is not configured (GEMINI_API_KEY is not set)."
+                }
+            }
         )
 
     raw_text = ""  # for error handling
@@ -129,6 +220,32 @@ async def diagnose(
         # ── Step 1: Read and validate image ─────────────────────────
         image_bytes = await image.read()
         print(f"[diagnose] Received image: {len(image_bytes)} bytes, type: {image.content_type}")
+
+        if not image_bytes or len(image_bytes) == 0:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "status": "bad_request",
+                    "error": "Invalid image format",
+                    "detail": "Uploaded image file is empty (0 bytes)."
+                }
+            )
+
+        # Check payload size (15MB limit)
+        MAX_IMAGE_SIZE = 15 * 1024 * 1024
+        if len(image_bytes) > MAX_IMAGE_SIZE:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "success": False,
+                    "status": "payload_too_large",
+                    "error": {
+                        "code": "PAYLOAD_TOO_LARGE",
+                        "message": "Uploaded image exceeds the 15MB size limit. Please upload a smaller image."
+                    }
+                }
+            )
 
         # Check for base64 encoded image string
         if image_bytes.startswith(b"data:image"):
@@ -158,7 +275,11 @@ async def diagnose(
             print(f"[diagnose] Image conversion error: {img_err}")
             return JSONResponse(
                 status_code=400,
-                content={"error": "Invalid image format", "detail": str(img_err)},
+                content={
+                    "success": False,
+                    "error": "Invalid image format",
+                    "detail": str(img_err)
+                },
             )
 
         # ── Step 2: Reverse geocode GPS → district, state ───────────
@@ -437,35 +558,30 @@ JSON structure:
   "low_confidence_note": null
 }}"""
             print("[diagnose] Calling Gemini text model with Roboflow context...")
-            model = get_model()
-            response = model.generate_content(
+            raw_text = generate_content_with_fallback(
                 text_prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.1,
                     max_output_tokens=4096,
                 )
             )
-            raw_text = response.text
         else:
             # ── Step 5: Call Gemini Vision with PIL image ──────────────────
-            print("[diagnose] Calling Gemini vision API (Fallback)...")
-            model = get_model()
-
-            response = model.generate_content(
+            print("[diagnose] Calling Gemini vision API...")
+            raw_text = generate_content_with_fallback(
                 [prompt, pil_image],
                 generation_config=genai.GenerationConfig(
                     temperature=0.1,
                     max_output_tokens=4096,
                 )
             )
-            raw_text = response.text
         
-        print("=" * 50)
-        print("GEMINI RAW RESPONSE:")
-        print(raw_text)
-        print("=" * 50)
+        safe_log("=" * 50)
+        safe_log("GEMINI RAW RESPONSE:")
+        safe_log(raw_text)
+        safe_log("=" * 50)
         
-        print(f"[diagnose] Gemini raw response preview: {raw_text[:200]}...")
+        safe_log(f"[diagnose] Gemini raw response preview: {raw_text[:200]}...")
 
         # ── Step 6: Parse JSON — extract correctly ──────────
         try:
@@ -511,8 +627,50 @@ JSON structure:
             except Exception as db_err:
                 print(f"[diagnose] Supabase save failed (non-critical): {db_err}")
 
-        print(f"[diagnose] [OK] Diagnosis success: {result.get('name')} ({result.get('confidence')})")
+        safe_log(f"[diagnose] [OK] Diagnosis success: {result.get('name')} ({result.get('confidence')})")
         return result
+
+    except (TooManyRequests, ResourceExhausted) as qe:
+        print(f"[diagnose] Upstream AI quota exceeded (429): {qe}")
+        return JSONResponse(
+            status_code=429,
+            content={
+                "success": False,
+                "status": "rate_limited",
+                "error": {
+                    "code": "AI_QUOTA_EXCEEDED",
+                    "message": "Crop analysis service is temporarily busy or free quota has been reached. Please try again shortly."
+                }
+            }
+        )
+
+    except (PermissionDenied, Unauthenticated, InvalidArgument, BadRequest) as auth_err:
+        print(f"[diagnose] Upstream AI credential/auth error (503): {type(auth_err).__name__}: {auth_err}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "status": "service_unavailable",
+                "error": {
+                    "code": "AI_SERVICE_UNAVAILABLE",
+                    "message": "Crop analysis service authentication failed or invalid API key. Please verify API configuration."
+                }
+            }
+        )
+
+    except (ServiceUnavailable, DeadlineExceeded) as net_err:
+        print(f"[diagnose] Upstream AI service unreachable/timeout (503): {net_err}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "status": "service_unavailable",
+                "error": {
+                    "code": "AI_SERVICE_UNAVAILABLE",
+                    "message": "Crop analysis service is temporarily unreachable. Please check your network and try again."
+                }
+            }
+        )
 
     except json.JSONDecodeError as je:
         print(f"[diagnose] JSON parse error: {je}")
@@ -529,8 +687,34 @@ JSON structure:
             }
         )
 
+    except ValueError as ve:
+        print(f"[diagnose] Value error: {ve}")
+        if "GEMINI_API_KEY" in str(ve):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "status": "service_unavailable",
+                    "error": {
+                        "code": "MISSING_API_KEY",
+                        "message": "Crop analysis service is not configured (GEMINI_API_KEY is not set)."
+                    }
+                }
+            )
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "status": "bad_request",
+                "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": str(ve)
+                }
+            }
+        )
+
     except Exception as e:
-        print(f"[diagnose] [ERROR] Error: {str(e)}")
+        print(f"[diagnose] [ERROR] Unexpected server error: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         return JSONResponse(
             status_code=500,
@@ -539,7 +723,7 @@ JSON structure:
                 "status": "server_error",
                 "error": {
                     "code": "DIAGNOSIS_FAILED",
-                    "message": "Crop diagnosis is temporarily unavailable. Please try again shortly."
+                    "message": "Crop diagnosis encountered an unexpected server error. Please try again shortly."
                 }
             }
         )

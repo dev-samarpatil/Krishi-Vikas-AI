@@ -15,8 +15,9 @@ def get_supabase() -> Client | None:
 
     url = os.getenv("SUPABASE_URL", "").strip()
     key = (
-        os.getenv("SUPABASE_KEY")
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         or os.getenv("SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_KEY")
         or os.getenv("SUPABASE_ANON_KEY")
         or ""
     ).strip()
@@ -49,23 +50,17 @@ async def save_diagnosis(
         return None
 
     try:
-        result = (
-            client.table("diagnoses")
-            .insert(
-                {
-                    "farmer_id": farmer_id,
-                    "disease_name": disease_name,
-                    "confidence": confidence,
-                    "lat": lat,
-                    "long": long,
-                    "district": district,
-                    "crop_type": crop_type,
-                    "farm_id": farm_id if farm_id else None,
-                    "treatment_chosen": treatment_chosen,
-                }
-            )
-            .execute()
-        )
+        payload = {
+            "disease_name": disease_name,
+            "confidence": round(confidence * 100, 2) if confidence <= 1.0 else confidence,
+            "crop": crop_type,
+        }
+        if farm_id:
+            payload["farm_id"] = farm_id
+        if farmer_id and farmer_id not in ("anonymous", "test_farmer"):
+            payload["user_id"] = farmer_id
+
+        result = client.table("diagnoses").insert(payload).execute()
         return result.data[0] if result.data else None
     except Exception as e:
         print(f"Supabase save_diagnosis error: {e}")

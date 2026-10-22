@@ -175,3 +175,112 @@ def test_diagnose_invalid_image_never_saved_to_supabase(mock_get_model, mock_sav
     )
     assert response.status_code == 200
     assert not mock_save_diagnosis.called, "Invalid image should NOT be saved in farm disease history!"
+
+
+@patch("routes.diagnose.get_model")
+def test_diagnose_gemini_quota_exceeded_returns_429(mock_get_model):
+    """When Gemini returns TooManyRequests/429, backend must return 429 rate_limited, not 500."""
+    from google.api_core.exceptions import TooManyRequests
+    mock_model = MagicMock()
+    mock_model.generate_content.side_effect = TooManyRequests("Quota exceeded for model")
+    mock_get_model.return_value = mock_model
+
+    img_bytes = create_test_image_bytes()
+    response = client.post(
+        "/api/diagnose",
+        files={"image": ("crop.jpg", img_bytes, "image/jpeg")},
+        data={"crop_type": "Tomato"}
+    )
+    assert response.status_code == 429
+    data = response.json()
+    assert data["success"] is False
+    assert data["status"] == "rate_limited"
+    assert data["error"]["code"] == "AI_QUOTA_EXCEEDED"
+    assert "temporarily busy" in data["error"]["message"]
+
+
+@patch("routes.diagnose.get_model")
+def test_diagnose_gemini_auth_failure_returns_503(mock_get_model):
+    """When Gemini auth fails (PermissionDenied/Unauthenticated), backend returns 503 without leaking keys."""
+    from google.api_core.exceptions import PermissionDenied
+    mock_model = MagicMock()
+    mock_model.generate_content.side_effect = PermissionDenied("API key invalid")
+    mock_get_model.return_value = mock_model
+
+    img_bytes = create_test_image_bytes()
+    response = client.post(
+        "/api/diagnose",
+        files={"image": ("crop.jpg", img_bytes, "image/jpeg")},
+        data={"crop_type": "Tomato"}
+    )
+    assert response.status_code == 503
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"]["code"] == "AI_SERVICE_UNAVAILABLE"
+    # Ensure no credentials or keys in error message
+    assert "AIza" not in json.dumps(data)
+    assert "traceback" not in data
+
+
+@patch("routes.diagnose.get_model")
+def test_diagnose_gemini_network_timeout_returns_503(mock_get_model):
+    """When Gemini call times out, backend returns 503 service unavailable."""
+    from google.api_core.exceptions import DeadlineExceeded
+    mock_model = MagicMock()
+    mock_model.generate_content.side_effect = DeadlineExceeded("Deadline exceeded")
+    mock_get_model.return_value = mock_model
+
+    img_bytes = create_test_image_bytes()
+    response = client.post(
+        "/api/diagnose",
+        files={"image": ("crop.jpg", img_bytes, "image/jpeg")},
+        data={"crop_type": "Tomato"}
+    )
+    assert response.status_code == 503
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"]["code"] == "AI_SERVICE_UNAVAILABLE"
+
+
+def test_diagnose_payload_too_large_returns_413():
+    """Images exceeding the 15MB limit must return 413 Payload Too Large."""
+    oversized_bytes = b"0" * (16 * 1024 * 1024)
+    response = client.post(
+        "/api/diagnose",
+        files={"image": ("huge.jpg", oversized_bytes, "image/jpeg")},
+        data={"crop_type": "Tomato"}
+    )
+    assert response.status_code == 413
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_diagnose_live_integration_real_model():
+    """Live integration test against configured Gemini Vision service."""
+    from dotenv import dotenv_values
+    env_vals = dotenv_values(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+    api_key = env_vals.get("GEMINI_API_KEY")
+    if not api_key or api_key.startswith("test_"):
+        pytest.skip("Live GEMINI_API_KEY not configured for live test")
+
+    vision_model = env_vals.get("GEMINI_VISION_MODEL") or "gemini-flash-lite-latest"
+    with patch.dict(os.environ, {"GEMINI_API_KEY": api_key, "GEMINI_VISION_MODEL": vision_model}):
+        img_bytes = create_test_image_bytes(color=(34, 139, 34))
+        response = client.post(
+            "/api/diagnose",
+            files={"image": ("leaf.jpg", img_bytes, "image/jpeg")},
+            data={"crop_type": "Tomato", "language": "en"}
+        )
+        # The response must either be 200 (if model quota available) or 429 (if upstream quota hit)
+        # but NEVER 500 internal server error!
+        assert response.status_code in (200, 429), f"Unexpected status {response.status_code}: {response.text}"
+        if response.status_code == 200:
+            data = response.json()
+            assert "name" in data
+            assert "confidence" in data
+        elif response.status_code == 429:
+            data = response.json()
+            assert data["error"]["code"] == "AI_QUOTA_EXCEEDED"
+
+

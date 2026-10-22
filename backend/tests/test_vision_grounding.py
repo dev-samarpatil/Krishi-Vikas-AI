@@ -13,7 +13,8 @@ def test_gemini_vision_real_call():
     if not api_key or api_key.startswith("test_"):
         pytest.skip("Live GEMINI_API_KEY not configured for live test")
     genai.configure(api_key=api_key, transport="rest")
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    vision_model = env_vals.get("GEMINI_VISION_MODEL") or os.getenv("GEMINI_VISION_MODEL") or "gemini-flash-lite-latest"
+    model = genai.GenerativeModel(vision_model)
 
     # Create a simple synthetic image representing a plant leaf
     img = Image.new("RGB", (300, 300), color=(34, 139, 34))
